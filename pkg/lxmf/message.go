@@ -1,0 +1,782 @@
+// SPDX-License-Identifier: 0BSD
+package lxmf
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"maps"
+	"reflect"
+	"time"
+
+	"quad4/msgpack/v5/pkg/msgpack"
+	"quad4/reticulum-go/pkg/destination"
+	"quad4/reticulum-go/pkg/identity"
+)
+
+// Signer signs packed message bytes (implemented by identity.Identity and similar).
+type Signer interface {
+	Sign(data []byte) ([]byte, error)
+}
+
+// SourceResolver looks up the source identity for inbound signature checks. Nil identity without error leaves signature unverified.
+type SourceResolver func(sourceHash []byte) (*identity.Identity, error)
+
+// LXMessage is a decoded or in-flight LXMF message. Use NewMessage or Unpack.
+type LXMessage struct {
+	DestinationHash []byte
+	SourceHash      []byte
+	Title           []byte
+	Content         []byte
+	Fields          map[byte]any
+	Timestamp       float64
+	Stamp           []byte
+
+	Hash      []byte
+	Signature []byte
+	Packed    []byte
+
+	State              byte
+	Method             byte
+	Representation     byte
+	Incoming           bool
+	SignatureValidated bool
+	UnverifiedReason   byte
+
+	// IncludeTicket requests a new outbound ticket attachment when sending.
+	IncludeTicket bool
+	// OutboundTicket is the optional 16-byte ticket for stamp short-circuit.
+	OutboundTicket []byte
+	// StampValue is the PoW score or StampValueTicket after ValidateStamp.
+	StampValue int
+	// StampValid reflects the last ValidateStamp outcome.
+	StampValid bool
+
+	PropagationStamp  []byte
+	PropagationPacked []byte
+	TransientID       []byte
+}
+
+// NewMessage builds a message in StateGenerating with the given hashes, title, content, and optional fields.
+func NewMessage(destinationHash, sourceHash, title, content []byte, fields map[byte]any) (*LXMessage, error) {
+	if len(destinationHash) != DestinationLength {
+		return nil, fmt.Errorf("destination: %w: expected %d, got %d", ErrInvalidHashLength, DestinationLength, len(destinationHash))
+	}
+	if len(sourceHash) != DestinationLength {
+		return nil, fmt.Errorf("source: %w: expected %d, got %d", ErrInvalidHashLength, DestinationLength, len(sourceHash))
+	}
+
+	return &LXMessage{
+		DestinationHash: append([]byte(nil), destinationHash...),
+		SourceHash:      append([]byte(nil), sourceHash...),
+		Title:           append([]byte(nil), title...),
+		Content:         append([]byte(nil), content...),
+		Fields:          copyFields(fields),
+		State:           StateGenerating,
+		Method:          MethodUnknown,
+		Representation:  RepresentationUnknown,
+	}, nil
+}
+
+func (m *LXMessage) SetTitle(title string) {
+	m.Title = []byte(title)
+}
+
+func (m *LXMessage) SetContent(content string) {
+	m.Content = []byte(content)
+}
+
+func (m *LXMessage) TitleString() string {
+	return string(m.Title)
+}
+
+func (m *LXMessage) ContentString() string {
+	return string(m.Content)
+}
+
+// FormatHash hex-encodes Hash.
+func (m *LXMessage) FormatHash() string {
+	return hex.EncodeToString(m.Hash)
+}
+
+// MessageID is an alias for Hash (stamps and tickets).
+func (m *LXMessage) MessageID() []byte {
+	return m.Hash
+}
+
+// PackedSize returns len(Packed), or 0 if not packed.
+func (m *LXMessage) PackedSize() int {
+	return len(m.Packed)
+}
+
+// ContentSize returns packed content length after Pack (upstream len(payload)-timestamp-struct overhead).
+func (m *LXMessage) ContentSize() (int, error) {
+	if len(m.Packed) == 0 {
+		return 0, errors.New("lxmf: message has not been packed")
+	}
+	payloadLen := len(m.Packed) - 2*DestinationLength - SignatureLength
+	if payloadLen <= TimestampSize+StructOverhead {
+		return 0, nil
+	}
+	return payloadLen - TimestampSize - StructOverhead, nil
+}
+
+// MaxContentForMethod returns the content cap for method and destination type (ok false if no single-packet limit).
+func MaxContentForMethod(method byte, destinationType byte) (int, bool) {
+	switch method {
+	case MethodOpportunistic:
+		switch destinationType {
+		case DestinationTypeSingle:
+			return EncryptedPacketMaxContent, true
+		case DestinationTypePlain:
+			return PlainPacketMaxContent, true
+		default:
+			return EncryptedPacketMaxContent, true
+		}
+	case MethodDirect, MethodPropagated:
+		return LinkPacketMaxContent, true
+	case MethodPaper:
+		return PaperMDU, true
+	default:
+		return 0, false
+	}
+}
+
+// ChooseDeliveryMethod selects method and representation from packed size; MethodUnknown becomes MethodDirect.
+func (m *LXMessage) ChooseDeliveryMethod(desiredMethod, destinationType byte) (method, representation byte, err error) {
+	if len(m.Packed) == 0 {
+		return 0, 0, errors.New("lxmf: message has not been packed")
+	}
+	if desiredMethod == MethodUnknown {
+		desiredMethod = MethodDirect
+	}
+	contentSize, err := m.ContentSize()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	switch desiredMethod {
+	case MethodOpportunistic:
+		limit, ok := MaxContentForMethod(MethodOpportunistic, destinationType)
+		if !ok {
+			return 0, 0, fmt.Errorf("lxmf: unsupported destination type %d for opportunistic delivery", destinationType)
+		}
+		if contentSize > limit {
+			return MethodDirect, RepresentationPacket, nil
+		}
+		return MethodOpportunistic, RepresentationPacket, nil
+
+	case MethodDirect, MethodPropagated:
+		if contentSize <= LinkPacketMaxContent {
+			return desiredMethod, RepresentationPacket, nil
+		}
+		return desiredMethod, RepresentationResource, nil
+
+	case MethodPaper:
+		if len(m.Packed) > PaperMDU {
+			return 0, 0, fmt.Errorf("lxmf: packed size %d exceeds paper MDU %d", len(m.Packed), PaperMDU)
+		}
+		return MethodPaper, RepresentationUnknown, nil
+
+	default:
+		return 0, 0, fmt.Errorf("lxmf: unsupported delivery method %d", desiredMethod)
+	}
+}
+
+// DetermineTransportEncryption returns whether the path is encrypted and the container transport_encryption string.
+func DetermineTransportEncryption(method, destinationType byte) (encrypted bool, description string) {
+	switch method {
+	case MethodOpportunistic, MethodPropagated, MethodPaper:
+		switch destinationType {
+		case DestinationTypeSingle:
+			return true, EncryptionDescriptionEC
+		case DestinationTypeGroup:
+			return true, EncryptionDescriptionAES
+		default:
+			return false, EncryptionDescriptionUnencrypted
+		}
+	case MethodDirect:
+		return true, EncryptionDescriptionEC
+	default:
+		return false, EncryptionDescriptionUnencrypted
+	}
+}
+
+// ValidateStamp checks PoW stamp or ticket-derived stamp; sets StampValid and StampValue on success.
+func (m *LXMessage) ValidateStamp(targetCost int, tickets [][]byte) (bool, error) {
+	if len(m.Hash) == 0 {
+		return false, errors.New("lxmf: message has no hash; pack or unpack it first")
+	}
+
+	if len(tickets) > 0 && len(m.Stamp) > 0 {
+		for _, ticket := range tickets {
+			if len(ticket) != TicketLength {
+				continue
+			}
+			expected := truncatedHash(ticket, m.Hash)
+			if bytes.Equal(expected, m.Stamp) {
+				m.StampValue = StampValueTicket
+				m.StampValid = true
+				return true, nil
+			}
+		}
+	}
+
+	if len(m.Stamp) == 0 {
+		m.StampValid = false
+		return false, nil
+	}
+
+	wb, err := StampWorkblock(m.Hash, WorkblockExpandRounds)
+	if err != nil {
+		return false, err
+	}
+	if !StampValid(m.Stamp, targetCost, wb) {
+		m.StampValid = false
+		return false, nil
+	}
+	m.StampValue = StampValue(wb, m.Stamp)
+	m.StampValid = true
+	return true, nil
+}
+
+func truncatedHash(ticket, messageID []byte) []byte {
+	buf := make([]byte, 0, len(ticket)+len(messageID))
+	buf = append(buf, ticket...)
+	buf = append(buf, messageID...)
+	sum := sha256.Sum256(buf)
+	return sum[:DestinationLength]
+}
+
+func (m *LXMessage) String() string {
+	if len(m.Hash) == 0 {
+		return "<LXMessage>"
+	}
+	return fmt.Sprintf("<LXMessage %s>", m.FormatHash())
+}
+
+func (m *LXMessage) payloadList(includeStamp bool) []any {
+	payload := []any{m.Timestamp, m.Title, m.Content, m.Fields}
+	if includeStamp && len(m.Stamp) > 0 {
+		payload = append(payload, m.Stamp)
+	}
+	return payload
+}
+
+// Pack msgpack-encodes the payload, signs, and fills Packed.
+func (m *LXMessage) Pack(signer Signer) ([]byte, error) {
+	if signer == nil {
+		return nil, errors.New("lxmf: signer required to pack message")
+	}
+	if len(m.DestinationHash) != DestinationLength {
+		return nil, fmt.Errorf("destination: %w", ErrInvalidHashLength)
+	}
+	if len(m.SourceHash) != DestinationLength {
+		return nil, fmt.Errorf("source: %w", ErrInvalidHashLength)
+	}
+
+	if m.Timestamp == 0 {
+		m.Timestamp = float64(time.Now().UnixNano()) / 1e9
+	}
+
+	hashedPayload, err := encodePayload(m.payloadList(false))
+	if err != nil {
+		return nil, fmt.Errorf("encode payload: %w", err)
+	}
+
+	hashedPart := make([]byte, 0, len(m.DestinationHash)+len(m.SourceHash)+len(hashedPayload))
+	hashedPart = append(hashedPart, m.DestinationHash...)
+	hashedPart = append(hashedPart, m.SourceHash...)
+	hashedPart = append(hashedPart, hashedPayload...)
+
+	hash := sha256.Sum256(hashedPart)
+	m.Hash = hash[:]
+
+	signedPart := make([]byte, 0, len(hashedPart)+len(m.Hash))
+	signedPart = append(signedPart, hashedPart...)
+	signedPart = append(signedPart, m.Hash...)
+
+	signature, err := signer.Sign(signedPart)
+	if err != nil {
+		return nil, fmt.Errorf("sign: %w", err)
+	}
+	if len(signature) != SignatureLength {
+		return nil, fmt.Errorf("unexpected signature length: %d", len(signature))
+	}
+	m.Signature = signature
+	m.SignatureValidated = true
+
+	packedPayload := hashedPayload
+	if len(m.Stamp) > 0 {
+		packedPayload, err = encodePayload(m.payloadList(true))
+		if err != nil {
+			return nil, fmt.Errorf("encode payload with stamp: %w", err)
+		}
+	}
+
+	packed := make([]byte, 0, 2*DestinationLength+SignatureLength+len(packedPayload))
+	packed = append(packed, m.DestinationHash...)
+	packed = append(packed, m.SourceHash...)
+	packed = append(packed, signature...)
+	packed = append(packed, packedPayload...)
+
+	m.Packed = packed
+	return packed, nil
+}
+
+// EncryptedPayload returns the ciphertext slice after the destination hash (for opportunistic send).
+func (m *LXMessage) EncryptedPayload() ([]byte, error) {
+	if m.Packed == nil {
+		return nil, errors.New("lxmf: message has not been packed")
+	}
+	return m.Packed[DestinationLength:], nil
+}
+
+// PackPropagated builds propagation_packed for delivery via a propagation node.
+// recipient must be an outbound lxmf.delivery destination for the message recipient.
+func (m *LXMessage) PackPropagated(recipient *destination.Destination, pnStampCost int) error {
+	if recipient == nil {
+		return errors.New("lxmf: nil recipient destination")
+	}
+	if len(m.Packed) == 0 {
+		return errors.New("lxmf: message has not been packed")
+	}
+
+	encrypted, err := recipient.Encrypt(m.Packed[DestinationLength:])
+	if err != nil {
+		return fmt.Errorf("encrypt for propagation: %w", err)
+	}
+
+	lxmfData := make([]byte, 0, DestinationLength+len(encrypted))
+	lxmfData = append(lxmfData, m.Packed[:DestinationLength]...)
+	lxmfData = append(lxmfData, encrypted...)
+
+	transientSum := sha256.Sum256(lxmfData)
+	m.TransientID = transientSum[:]
+
+	if pnStampCost > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		stamp, _, err := GenerateStamp(ctx, m.TransientID, pnStampCost, WorkblockExpandRoundsPN)
+		if err != nil {
+			return fmt.Errorf("propagation stamp: %w", err)
+		}
+		m.PropagationStamp = stamp
+		lxmfData = append(lxmfData, m.PropagationStamp...)
+	}
+
+	outer, err := msgpack.Marshal([]any{float64(time.Now().UnixNano()) / 1e9, []any{lxmfData}})
+	if err != nil {
+		return fmt.Errorf("encode propagation payload: %w", err)
+	}
+	m.PropagationPacked = outer
+	m.Method = MethodPropagated
+	m.Representation = RepresentationPacket
+	if len(outer) > LinkPacketMaxContent {
+		m.Representation = RepresentationResource
+	}
+	return nil
+}
+
+// Unpack parses a full on-wire blob starting with destination hash.
+func Unpack(data []byte, resolver SourceResolver) (*LXMessage, error) {
+	if len(data) < 2*DestinationLength+SignatureLength {
+		return nil, fmt.Errorf("%w: minimum %d bytes", ErrMessageTooShort, 2*DestinationLength+SignatureLength)
+	}
+
+	dst := append([]byte(nil), data[:DestinationLength]...)
+	return UnpackFromBytes(dst, data[DestinationLength:], resolver)
+}
+
+// UnpackFromBytes parses inner LXMF bytes when destinationHash is known out-of-band.
+func UnpackFromBytes(destinationHash, inner []byte, resolver SourceResolver) (*LXMessage, error) {
+	if len(destinationHash) != DestinationLength {
+		return nil, fmt.Errorf("destination: %w", ErrInvalidHashLength)
+	}
+	if len(inner) < DestinationLength+SignatureLength {
+		return nil, fmt.Errorf("%w: minimum %d bytes", ErrMessageTooShort, DestinationLength+SignatureLength)
+	}
+
+	source := append([]byte(nil), inner[:DestinationLength]...)
+	signature := append([]byte(nil), inner[DestinationLength:DestinationLength+SignatureLength]...)
+	packedPayload := inner[DestinationLength+SignatureLength:]
+
+	payload, hashedPayload, err := decodePayloadAndSplit(packedPayload)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPayload, err)
+	}
+
+	m := &LXMessage{
+		DestinationHash:    append([]byte(nil), destinationHash...),
+		SourceHash:         source,
+		Signature:          signature,
+		Incoming:           true,
+		State:              StateGenerating,
+		Method:             MethodUnknown,
+		Representation:     RepresentationUnknown,
+		SignatureValidated: false,
+	}
+
+	if err := m.applyPayload(payload); err != nil {
+		return nil, err
+	}
+
+	hashedPart := make([]byte, 0, 2*DestinationLength+len(hashedPayload))
+	hashedPart = append(hashedPart, destinationHash...)
+	hashedPart = append(hashedPart, source...)
+	hashedPart = append(hashedPart, hashedPayload...)
+
+	hash := sha256.Sum256(hashedPart)
+	m.Hash = hash[:]
+
+	signedPart := make([]byte, 0, len(hashedPart)+len(m.Hash))
+	signedPart = append(signedPart, hashedPart...)
+	signedPart = append(signedPart, m.Hash...)
+
+	packed := make([]byte, 0, 2*DestinationLength+SignatureLength+len(packedPayload))
+	packed = append(packed, destinationHash...)
+	packed = append(packed, source...)
+	packed = append(packed, signature...)
+	packed = append(packed, packedPayload...)
+	m.Packed = packed
+
+	if resolver != nil {
+		sourceID, resolveErr := resolver(source)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("resolve source: %w", resolveErr)
+		}
+		if sourceID == nil {
+			m.UnverifiedReason = UnverifiedSourceUnknown
+			return m, nil
+		}
+		if !sourceID.Verify(signedPart, signature) {
+			m.UnverifiedReason = UnverifiedSignatureInvalid
+			return m, ErrSignatureInvalid
+		}
+		m.SignatureValidated = true
+	} else {
+		m.UnverifiedReason = UnverifiedSourceUnknown
+	}
+
+	return m, nil
+}
+
+// RecallSource wraps identity.Recall (nil identity if missing).
+func RecallSource(sourceHash []byte) (*identity.Identity, error) {
+	id, err := identity.Recall(sourceHash)
+	if err != nil {
+		return nil, nil
+	}
+	return id, nil
+}
+
+func (m *LXMessage) applyPayload(payload []any) error {
+	if len(payload) < 4 {
+		return fmt.Errorf("%w: expected 4 elements, got %d", ErrInvalidPayload, len(payload))
+	}
+
+	switch v := payload[0].(type) {
+	case float64:
+		m.Timestamp = v
+	case float32:
+		m.Timestamp = float64(v)
+	case int8:
+		m.Timestamp = float64(v)
+	case int16:
+		m.Timestamp = float64(v)
+	case int32:
+		m.Timestamp = float64(v)
+	case int64:
+		m.Timestamp = float64(v)
+	case uint8:
+		m.Timestamp = float64(v)
+	case uint16:
+		m.Timestamp = float64(v)
+	case uint32:
+		m.Timestamp = float64(v)
+	case uint64:
+		m.Timestamp = float64(v)
+	default:
+		return fmt.Errorf("%w: unexpected timestamp type %T", ErrInvalidPayload, v)
+	}
+
+	title, err := asBytes(payload[1])
+	if err != nil {
+		return fmt.Errorf("title: %w", err)
+	}
+	m.Title = title
+
+	content, err := asBytes(payload[2])
+	if err != nil {
+		return fmt.Errorf("content: %w", err)
+	}
+	m.Content = content
+
+	fields, err := asFields(payload[3])
+	if err != nil {
+		return fmt.Errorf("fields: %w", err)
+	}
+	m.Fields = fields
+
+	if len(payload) > 4 {
+		stamp, err := asBytes(payload[4])
+		if err != nil {
+			return fmt.Errorf("stamp: %w", err)
+		}
+		m.Stamp = stamp
+	}
+
+	return nil
+}
+
+func encodePayload(payload []any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := msgpack.NewEncoder(&buf)
+	enc.UseCompactInts(true)
+	enc.UseCompactFloats(false)
+	enc.UseInternedStrings(false)
+	if err := enc.Encode(payload); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodePayloadAndSplit decodes payload and preserves raw bytes for hashing (multi-field map order stability).
+func decodePayloadAndSplit(data []byte) ([]any, []byte, error) {
+	r := bytes.NewReader(data)
+	dec := msgpack.NewDecoder(r)
+	dec.UseLooseInterfaceDecoding(true)
+	mapCtx := &msgpackMapCtx{maxDepth: msgpackMapMaxDepth, maxPairs: msgpackMapMaxPairs}
+	dec.SetMapDecoder(mapCtx.decodeMap)
+
+	totalLen := int64(len(data))
+	arrLen, err := dec.DecodeArrayLen()
+	if err != nil {
+		return nil, nil, err
+	}
+	if arrLen < 4 {
+		return nil, nil, fmt.Errorf("expected at least 4 elements, got %d", arrLen)
+	}
+	if arrLen > 15 {
+		return nil, nil, fmt.Errorf("payload array too long: %d", arrLen)
+	}
+
+	posAfterHeader := totalLen - int64(r.Len())
+
+	out := make([]any, 0, arrLen)
+	for range 4 {
+		v, decErr := dec.DecodeInterface()
+		if decErr != nil {
+			return nil, nil, decErr
+		}
+		out = append(out, v)
+	}
+	posAfterFourth := totalLen - int64(r.Len())
+
+	var hashed []byte
+	if arrLen == 4 {
+		hashed = append([]byte(nil), data...)
+	} else {
+		body := data[posAfterHeader:posAfterFourth]
+		hashed = make([]byte, 0, 1+len(body))
+		hashed = append(hashed, 0x94)
+		hashed = append(hashed, body...)
+	}
+
+	for i := 4; i < arrLen; i++ {
+		v, decErr := dec.DecodeInterface()
+		if decErr != nil {
+			return nil, nil, decErr
+		}
+		out = append(out, v)
+	}
+	if r.Len() != 0 {
+		return nil, nil, fmt.Errorf("%w: trailing payload bytes", ErrInvalidPayload)
+	}
+	if arrLen != 4 && arrLen != 5 {
+		return nil, nil, fmt.Errorf("%w: unexpected payload array length %d", ErrInvalidPayload, arrLen)
+	}
+	return out, hashed, nil
+}
+
+// msgpack map decode limits (DoS bounds).
+const (
+	msgpackMapMaxDepth = 32
+	msgpackMapMaxPairs = 8192
+)
+
+type msgpackMapCtx struct {
+	depth    int
+	maxDepth int
+	maxPairs int
+}
+
+func (c *msgpackMapCtx) decodeMap(d *msgpack.Decoder) (any, error) {
+	if c.depth >= c.maxDepth {
+		return nil, fmt.Errorf("%w: msgpack map nesting exceeds %d", ErrInvalidPayload, c.maxDepth)
+	}
+	c.depth++
+	defer func() { c.depth-- }()
+
+	n, err := d.DecodeMapLen()
+	if err != nil {
+		return nil, err
+	}
+	if n == -1 {
+		return nil, nil
+	}
+	if n > c.maxPairs {
+		return nil, fmt.Errorf("%w: msgpack map too large (%d entries)", ErrInvalidPayload, n)
+	}
+	out := make(map[any]any, n)
+	for range n {
+		k, err := d.DecodeInterface()
+		if err != nil {
+			return nil, err
+		}
+		if k != nil && !reflect.TypeOf(k).Comparable() {
+			return nil, fmt.Errorf("%w: msgpack map key type %T cannot be used as a map key", ErrInvalidPayload, k)
+		}
+		v, err := d.DecodeInterface()
+		if err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func copyFields(in map[byte]any) map[byte]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[byte]any, len(in))
+	maps.Copy(out, in)
+	return out
+}
+
+func asBytes(v any) ([]byte, error) {
+	switch x := v.(type) {
+	case nil:
+		return nil, nil
+	case []byte:
+		return append([]byte(nil), x...), nil
+	case string:
+		return []byte(x), nil
+	default:
+		return nil, fmt.Errorf("%w: expected bytes, got %T", ErrInvalidPayload, v)
+	}
+}
+
+func asFields(v any) (map[byte]any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	m, ok := v.(map[any]any)
+	if !ok {
+		if mm, ok2 := v.(map[string]any); ok2 {
+			out := make(map[byte]any, len(mm))
+			for k, val := range mm {
+				if len(k) != 1 {
+					return nil, fmt.Errorf("%w: field key must encode as single byte, got %q", ErrInvalidPayload, k)
+				}
+				normalized, err := normalizeFieldValue(val)
+				if err != nil {
+					return nil, err
+				}
+				out[k[0]] = normalized
+			}
+			return out, nil
+		}
+		return nil, fmt.Errorf("%w: expected map, got %T", ErrInvalidPayload, v)
+	}
+	out := make(map[byte]any, len(m))
+	for k, val := range m {
+		key, err := asByteKey(k)
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := normalizeFieldValue(val)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = normalized
+	}
+	return out, nil
+}
+
+func normalizeFieldValue(v any) (any, error) {
+	switch x := v.(type) {
+	case map[any]any:
+		return asFields(x)
+	case map[byte]any:
+		out := make(map[byte]any, len(x))
+		for k, val := range x {
+			normalized, err := normalizeFieldValue(val)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = normalized
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(x))
+		for i, elem := range x {
+			normalized, err := normalizeFieldValue(elem)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = normalized
+		}
+		return out, nil
+	default:
+		return v, nil
+	}
+}
+
+func asByteKey(v any) (byte, error) {
+	switch x := v.(type) {
+	case int8:
+		if x < 0 {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	case int16:
+		if x < 0 || x > 0xFF {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	case int32:
+		if x < 0 || x > 0xFF {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	case int64:
+		if x < 0 || x > 0xFF {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	case uint8:
+		return x, nil
+	case uint16:
+		if x > 0xFF {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	case uint32:
+		if x > 0xFF {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	case uint64:
+		if x > 0xFF {
+			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
+		}
+		return byte(x), nil
+	default:
+		return 0, fmt.Errorf("%w: field key has unexpected type %T", ErrInvalidPayload, v)
+	}
+}

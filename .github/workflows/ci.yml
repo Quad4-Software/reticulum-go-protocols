@@ -1,0 +1,216 @@
+# Pinned actions (bump tag and SHA together when upgrading):
+#   actions/checkout@v7.0.0            9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+#
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Suite to run (push/PR always run lint, test, examples, security)
+        type: choice
+        options:
+          - all
+          - check
+          - test
+          - test-full
+          - race
+          - examples
+          - security
+          - interop
+        default: all
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+env:
+  CI_GO_VERSION: "1.26.5"
+  CI_TASK_VERSION: "3.46.3"
+  CI_REVIVE_VERSION: "v1.15.0"
+  CI_GOSEC_VERSION: "v2.24.5"
+  CI_UV_VERSION: "0.11.32"
+  LXMF_REF_REV: "1.1.0"
+  RRC_REF_REV: "main"
+  GOFLAGS: -mod=vendor
+  GOPROXY: "off"
+  GOSUMDB: "off"
+  GOTOOLCHAIN: local
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","check"]'), inputs.suite)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        env:
+          CI_INSTALL_REVIVE: "1"
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Format check
+        run: sh scripts/ci/run-suite.sh fmt
+
+      - name: Vet
+        run: sh scripts/ci/run-suite.sh vet
+
+      - name: Revive
+        run: sh scripts/ci/run-suite.sh lint
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  test:
+    name: Test (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","test","check"]'), inputs.suite)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-amd64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Short tests
+        run: sh scripts/ci/run-suite.sh test-short
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  test-full:
+    name: Full test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      contains(fromJSON('["all","test-full"]'), inputs.suite)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Full test suite
+        run: sh scripts/ci/run-suite.sh test
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      contains(fromJSON('["all","race"]'), inputs.suite)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Race tests
+        run: sh scripts/ci/run-suite.sh test-race
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","examples","check"]'), inputs.suite)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Build examples
+        run: sh scripts/ci/run-suite.sh examples
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  security:
+    name: Security (gosec)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","security","check"]'), inputs.suite)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        env:
+          CI_INSTALL_GOSEC: "1"
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Gosec
+        run: sh scripts/ci/run-suite.sh scan
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  interop:
+    name: Python interop (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      contains(fromJSON('["all","interop"]'), inputs.suite)
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [lxmf, rrc]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Setup uv
+        run: sh scripts/ci/setup-uv.sh "${{ env.CI_UV_VERSION }}"
+
+      - name: Clone reference repos
+        run: sh scripts/ci/clone-refs.sh
+
+      - name: Run interop
+        run: sh scripts/ci/run-suite.sh "interop-${{ matrix.target }}"
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh

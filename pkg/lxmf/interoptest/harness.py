@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""JSON stdin/stdout harness for Go <-> LXMF-ref interop tests."""
+
+from __future__ import annotations
+
+import base64
+import json
+import sys
+import traceback
+from typing import Any
+
+import RNS
+import RNS.vendor.umsgpack as msgpack
+from LXMF import LXMessage
+import LXMF.LXStamper as LXStamper
+import LXMF.LXMF as LXMF
+import LXMF as LXMF_pkg
+
+RNS.loglevel = RNS.LOG_NONE
+
+
+def _hex(b: bytes | None) -> str:
+    if b is None:
+        return ""
+    return b.hex()
+
+
+def _unhex(s: str) -> bytes:
+    return bytes.fromhex(s)
+
+
+def _field_key(k: Any) -> int:
+    if isinstance(k, int):
+        return k
+    if isinstance(k, str):
+        if k.startswith("0x") or k.startswith("0X"):
+            return int(k, 16)
+        return int(k)
+    raise ValueError(f"invalid field key: {k!r}")
+
+
+def _normalize_fields(raw: dict[str, Any] | None) -> dict[int, Any] | None:
+    if raw is None:
+        return None
+    out: dict[int, Any] = {}
+    for k, v in raw.items():
+        key = _field_key(k)
+        if isinstance(v, dict):
+            inner: dict[int, Any] = {}
+            for ik, iv in v.items():
+                inner[_field_key(ik)] = _bytesify(iv)
+            out[key] = inner
+        else:
+            out[key] = _bytesify(v)
+    return out
+
+
+def _bytesify(v: Any) -> Any:
+    if isinstance(v, list):
+        return [_bytesify(x) for x in v]
+    if isinstance(v, str) and v.startswith("hex:"):
+        return _unhex(v[4:])
+    return v
+
+
+def _fields_out(fields: dict[int, Any] | None) -> dict[str, Any]:
+    if not fields:
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in fields.items():
+        key = f"0x{k:02x}"
+        if isinstance(v, bytes):
+            out[key] = "hex:" + v.hex()
+        elif isinstance(v, dict):
+            inner: dict[str, Any] = {}
+            for ik, iv in v.items():
+                ikey = f"0x{int(ik):02x}"
+                if isinstance(iv, bytes):
+                    inner[ikey] = "hex:" + iv.hex()
+                else:
+                    inner[ikey] = iv
+            out[key] = inner
+        elif isinstance(v, list):
+            out[key] = [
+                ("hex:" + x.hex()) if isinstance(x, bytes) else x for x in v
+            ]
+        else:
+            out[key] = v
+    return out
+
+
+def _register_identity(public_key: bytes, dest_hash: bytes | None = None) -> RNS.Identity:
+    ident = RNS.Identity(create_keys=False)
+    ident.load_public_key(public_key)
+    remember_hash = dest_hash if dest_hash is not None else ident.hash
+    RNS.Identity.remember(None, remember_hash, public_key)
+    return ident
+
+
+def _as_text(val: Any) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (bytes, bytearray)):
+        try:
+            return bytes(val).decode("utf-8")
+        except UnicodeDecodeError:
+            return "hex:" + bytes(val).hex()
+    return str(val)
+
+
+def _message_out(msg: LXMessage) -> dict[str, Any]:
+    return {
+        "hash": _hex(msg.hash),
+        "title": _as_text(msg.title),
+        "content": _as_text(msg.content),
+        "fields": _fields_out(msg.fields),
+        "timestamp": msg.timestamp,
+        "signature_validated": bool(msg.signature_validated),
+        "unverified_reason": msg.unverified_reason,
+        "stamp": _hex(msg.stamp) if msg.stamp else "",
+        "destination_hash": _hex(msg.destination_hash),
+        "source_hash": _hex(msg.source_hash),
+    }
+
+
+def cmd_ping(_req: dict[str, Any]) -> dict[str, Any]:
+    return {"ok": True, "lxmf_version": LXMF_pkg.__version__}
+
+
+def cmd_pack(req: dict[str, Any]) -> dict[str, Any]:
+    title = req.get("title", "")
+    content = req.get("content", "")
+    fields = _normalize_fields(req.get("fields"))
+    timestamp = req.get("timestamp")
+    stamp_hex = req.get("stamp", "")
+
+    src_id = RNS.Identity()
+    dst_id = RNS.Identity()
+    src = RNS.Destination(
+        src_id, RNS.Destination.OUT, RNS.Destination.SINGLE, LXMF.APP_NAME, "delivery"
+    )
+    dst = RNS.Destination(
+        dst_id, RNS.Destination.OUT, RNS.Destination.SINGLE, LXMF.APP_NAME, "delivery"
+    )
+
+    msg = LXMessage(
+        dst, src, content, title, fields=fields, desired_method=LXMessage.DIRECT
+    )
+    msg.defer_stamp = True
+    if timestamp is not None:
+        msg.timestamp = float(timestamp)
+    if stamp_hex:
+        msg.stamp = _unhex(stamp_hex)
+        msg.defer_stamp = False
+    msg.pack()
+
+    return {
+        "ok": True,
+        "packed": _hex(msg.packed),
+        "hash": _hex(msg.hash),
+        "source_public_key": _hex(src_id.get_public_key()),
+        "destination_public_key": _hex(dst_id.get_public_key()),
+        "source_hash": _hex(src.hash),
+        "destination_hash": _hex(dst.hash),
+        "message": _message_out(msg),
+    }
+
+
+def cmd_unpack(req: dict[str, Any]) -> dict[str, Any]:
+    packed = _unhex(req["packed"])
+    for entry in req.get("identities", []):
+        _register_identity(_unhex(entry["public_key"]), _unhex(entry["hash"]))
+    keys = req.get("public_keys", {})
+    for _label, pk_hex in keys.items():
+        _register_identity(_unhex(pk_hex))
+
+    msg = LXMessage.unpack_from_bytes(packed)
+    if msg is None:
+        raise ValueError("unpack_from_bytes returned None")
+
+    return {"ok": True, "message": _message_out(msg)}
+
+
+def cmd_stamp_workblock(req: dict[str, Any]) -> dict[str, Any]:
+    material = _unhex(req["material"])
+    rounds = int(req.get("expand_rounds", LXStamper.WORKBLOCK_EXPAND_ROUNDS))
+    wb = LXStamper.stamp_workblock(material, expand_rounds=rounds)
+    return {"ok": True, "workblock": _hex(wb)}
+
+
+def cmd_stamp_valid(req: dict[str, Any]) -> dict[str, Any]:
+    stamp = _unhex(req["stamp"])
+    workblock = _unhex(req["workblock"])
+    target = int(req["target_cost"])
+    valid = LXStamper.stamp_valid(stamp, target, workblock)
+    return {"ok": True, "valid": valid}
+
+
+def cmd_stamp_value(req: dict[str, Any]) -> dict[str, Any]:
+    stamp = _unhex(req["stamp"])
+    workblock = _unhex(req["workblock"])
+    value = LXStamper.stamp_value(workblock, stamp)
+    return {"ok": True, "value": value}
+
+
+def cmd_generate_stamp(req: dict[str, Any]) -> dict[str, Any]:
+    message_id = _unhex(req["message_id"])
+    cost = int(req["stamp_cost"])
+    rounds = int(req.get("expand_rounds", LXStamper.WORKBLOCK_EXPAND_ROUNDS))
+    stamp, value = LXStamper.generate_stamp(message_id, cost, expand_rounds=rounds)
+    if stamp is None:
+        raise ValueError("stamp generation failed")
+    return {"ok": True, "stamp": _hex(stamp), "value": value}
+
+
+def cmd_validate_pn_stamp(req: dict[str, Any]) -> dict[str, Any]:
+    data = _unhex(req["transient_data"])
+    target = int(req["target_cost"])
+    tid, lxm, value, stamp = LXStamper.validate_pn_stamp(data, target)
+    return {
+        "ok": True,
+        "transient_id": _hex(tid) if tid else "",
+        "lxm_data": _hex(lxm) if lxm else "",
+        "value": value if value is not None else 0,
+        "stamp": _hex(stamp) if stamp else "",
+        "valid": tid is not None,
+    }
+
+
+def cmd_packed_container(req: dict[str, Any]) -> dict[str, Any]:
+    packed = _unhex(req["packed"])
+    msg = LXMessage.unpack_from_bytes(packed)
+    if msg is None:
+        raise ValueError("unpack failed")
+    if "state" in req:
+        msg.state = int(req["state"])
+    if "method" in req:
+        msg.method = int(req["method"])
+    msg.determine_transport_encryption()
+    container = msg.packed_container()
+    return {"ok": True, "container": _hex(container)}
+
+
+def cmd_container_unpack(req: dict[str, Any]) -> dict[str, Any]:
+    for entry in req.get("identities", []):
+        _register_identity(_unhex(entry["public_key"]), _unhex(entry["hash"]))
+    data = _unhex(req["container"])
+    container = msgpack.unpackb(data)
+    lxm_bytes = container["lxmf_bytes"]
+    msg = LXMessage.unpack_from_bytes(lxm_bytes)
+    if msg is None:
+        raise ValueError("unpack failed")
+    if "state" in container:
+        msg.state = container["state"]
+    if "method" in container:
+        msg.method = container["method"]
+    return {
+        "ok": True,
+        "state": container.get("state"),
+        "method": container.get("method"),
+        "transport_encrypted": container.get("transport_encrypted"),
+        "transport_encryption": container.get("transport_encryption"),
+        "message": _message_out(msg),
+    }
+
+
+def cmd_announce_encode(req: dict[str, Any]) -> dict[str, Any]:
+    name = req.get("display_name", "")
+    cost = req.get("stamp_cost")
+    features = req.get("features")
+    if features is not None:
+        features = [_field_key(f) for f in features]
+    if cost is None and features is None:
+        app_data = name.encode("utf-8")
+    else:
+        payload: list[Any] = [name.encode("utf-8")]
+        if cost is not None:
+            payload.append(int(cost))
+        if features is not None:
+            payload.append(features)
+        app_data = msgpack.packb(payload)
+    return {"ok": True, "app_data": _hex(app_data)}
+
+
+def cmd_announce_decode(req: dict[str, Any]) -> dict[str, Any]:
+    app_data = _unhex(req["app_data"])
+    return {
+        "ok": True,
+        "display_name": LXMF.display_name_from_app_data(app_data),
+        "stamp_cost": LXMF.stamp_cost_from_app_data(app_data),
+        "compression_support": LXMF.compression_support_from_app_data(app_data),
+    }
+
+
+def cmd_paper_uri(req: dict[str, Any]) -> dict[str, Any]:
+    payload = _unhex(req["paper_packed"])
+    encoded = base64.urlsafe_b64encode(payload).decode("utf-8").replace("=", "")
+    uri = LXMessage.URI_SCHEMA + "://" + encoded
+    return {"ok": True, "uri": uri}
+
+
+def cmd_paper_decode(req: dict[str, Any]) -> dict[str, Any]:
+    uri = req["uri"]
+    prefix = LXMessage.URI_SCHEMA + "://"
+    if not uri.startswith(prefix):
+        raise ValueError("missing lxm:// prefix")
+    encoded = uri[len(prefix) :]
+    pad = (-len(encoded)) % 4
+    decoded = base64.urlsafe_b64decode(encoded + ("=" * pad))
+    return {"ok": True, "paper_packed": _hex(decoded)}
+
+
+def cmd_ticket_stamp(req: dict[str, Any]) -> dict[str, Any]:
+    ticket = _unhex(req["ticket"])
+    message_id = _unhex(req["message_id"])
+    stamp = RNS.Identity.truncated_hash(ticket + message_id)
+    return {"ok": True, "stamp": _hex(stamp)}
+
+
+HANDLERS = {
+    "ping": cmd_ping,
+    "pack": cmd_pack,
+    "unpack": cmd_unpack,
+    "stamp_workblock": cmd_stamp_workblock,
+    "stamp_valid": cmd_stamp_valid,
+    "stamp_value": cmd_stamp_value,
+    "generate_stamp": cmd_generate_stamp,
+    "validate_pn_stamp": cmd_validate_pn_stamp,
+    "packed_container": cmd_packed_container,
+    "container_unpack": cmd_container_unpack,
+    "announce_encode": cmd_announce_encode,
+    "announce_decode": cmd_announce_decode,
+    "paper_uri": cmd_paper_uri,
+    "paper_decode": cmd_paper_decode,
+    "ticket_stamp": cmd_ticket_stamp,
+}
+
+
+def main() -> int:
+    try:
+        raw = sys.stdin.read()
+        req = json.loads(raw)
+        cmd = req.get("cmd")
+        if cmd not in HANDLERS:
+            out = {"ok": False, "error": f"unknown command: {cmd}"}
+        else:
+            out = HANDLERS[cmd](req)
+    except Exception as exc:
+        out = {
+            "ok": False,
+            "error": str(exc),
+            "trace": traceback.format_exc(),
+        }
+    sys.stdout.write(json.dumps(out))
+    sys.stdout.flush()
+    return 0 if out.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
