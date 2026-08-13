@@ -155,13 +155,14 @@ func peerKey(hash []byte) peerID {
 }
 
 func (h *Hub) acceptLink(lnk *link.Link) {
-	rateCap := int(h.cfg.Limits.RateLimitMsgsPerMinute)
-	if rateCap < 8 {
-		rateCap = 8
+	n := h.cfg.Limits.RateLimitMsgsPerMinute
+	if n < 8 {
+		n = 8
 	}
-	if rateCap > 256 {
-		rateCap = 256
+	if n > 256 {
+		n = 256
 	}
+	rateCap := int(n) // #nosec G115 -- n is clamped to 8..256
 	p := &hubPeer{
 		rooms:    make(map[string]struct{}),
 		msgTimes: make([]time.Time, 0, rateCap),
