@@ -5,6 +5,7 @@ import "errors"
 
 var (
 	ErrInvalidEnvelope  = errors.New("rrc: invalid envelope")
+	ErrEnvelopeTooLarge = errors.New("rrc: envelope exceeds size limit")
 	ErrWrongVersion     = errors.New("rrc: unsupported protocol version")
 	ErrMissingField     = errors.New("rrc: missing required envelope field")
 	ErrBadFieldLength   = errors.New("rrc: fixed field has wrong length")

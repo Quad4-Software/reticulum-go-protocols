@@ -113,6 +113,34 @@ func TestMessage_QoL(t *testing.T) {
 	if msg.Equal(msg3) {
 		t.Error("expected messages to be different")
 	}
+
+	groupA := bytes.Repeat([]byte{0xaa}, SenderHashLength)
+	groupB := bytes.Repeat([]byte{0xbb}, SenderHashLength)
+	withA, err := NewMessageWithGroup(senderHash, groupA, text)
+	if err != nil {
+		t.Fatalf("NewMessageWithGroup: %v", err)
+	}
+	withB, err := NewMessageWithGroup(senderHash, groupB, text)
+	if err != nil {
+		t.Fatalf("NewMessageWithGroup: %v", err)
+	}
+	if withA.Equal(withB) {
+		t.Fatal("Equal ignored group hash")
+	}
+	withA2, _ := NewMessageWithGroup(senderHash, groupA, text)
+	if !withA.Equal(withA2) {
+		t.Fatal("same group should compare equal")
+	}
+
+	mut := append([]byte(nil), senderHash...)
+	owned, err := NewMessage(mut, text)
+	if err != nil {
+		t.Fatalf("NewMessage: %v", err)
+	}
+	mut[0] ^= 0xff
+	if !bytes.Equal(owned.SenderHash, senderHash) {
+		t.Fatal("NewMessage aliased caller hash slice")
+	}
 }
 
 func TestNewMessageFromHex(t *testing.T) {

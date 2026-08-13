@@ -299,6 +299,44 @@ func TestBodySizeBytes(t *testing.T) {
 	}
 }
 
+func TestUnmarshalEnvelopeRejectsOversize(t *testing.T) {
+	data := make([]byte, MaxEnvelopeBytes+1)
+	_, err := UnmarshalEnvelope(data)
+	if err != ErrEnvelopeTooLarge {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUnmarshalEnvelopeRejectsDeepNesting(t *testing.T) {
+	inner := []byte{0xa0}
+	for range 16 {
+		wrapped := make([]byte, 0, 2+len(inner))
+		wrapped = append(wrapped, 0xa1, 0x00)
+		wrapped = append(wrapped, inner...)
+		inner = wrapped
+	}
+	_, err := UnmarshalEnvelope(inner)
+	if err == nil {
+		t.Fatal("expected nested map to be rejected")
+	}
+}
+
+func TestEnvelopeFromPreservesMsgID(t *testing.T) {
+	sender := bytes.Repeat([]byte{0x11}, IdentityLength)
+	msgID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	env, err := envelopeFrom(TypeMsg, sender, msgID, 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Timestamp != 99 || !bytes.Equal(env.MsgID, msgID) {
+		t.Fatalf("ts=%d id=%x", env.Timestamp, env.MsgID)
+	}
+	msgID[0] = 0xff
+	if env.MsgID[0] == 0xff {
+		t.Fatal("envelopeFrom aliased msgid")
+	}
+}
+
 func TestValidateResourceEnvelopeBody(t *testing.T) {
 	ok := map[uint64]any{
 		ResourceKeyID:   []byte{1, 2, 3},

@@ -2,12 +2,39 @@
 package rrc
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
 )
+
+var (
+	envelopeEnc    cbor.UserBufferEncMode
+	envelopeDec    cbor.DecMode
+	marshalBufPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
+)
+
+func init() {
+	enc, err := cbor.EncOptions{}.UserBufferEncMode()
+	if err != nil {
+		panic("rrc: cbor encoder: " + err.Error())
+	}
+	envelopeEnc = enc
+	dec, err := cbor.DecOptions{
+		MaxNestedLevels:  8,
+		MaxArrayElements: 1024,
+		MaxMapPairs:      256,
+	}.DecMode()
+	if err != nil {
+		panic("rrc: cbor decoder: " + err.Error())
+	}
+	envelopeDec = dec
+}
 
 // Envelope is the top-level RRC CBOR map (3-RRC).
 type Envelope struct {
@@ -26,6 +53,15 @@ type Envelope struct {
 	HasDestination bool
 }
 
+func cloneBytes(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out
+}
+
 // NewEnvelope builds a version-1 envelope with a fresh message ID and timestamp.
 func NewEnvelope(msgType uint64, sender []byte) (*Envelope, error) {
 	if len(sender) != IdentityLength {
@@ -40,7 +76,25 @@ func NewEnvelope(msgType uint64, sender []byte) (*Envelope, error) {
 		Type:      msgType,
 		MsgID:     id,
 		Timestamp: uint64(time.Now().UnixMilli()),
-		Sender:    append([]byte(nil), sender...),
+		Sender:    cloneBytes(sender),
+	}, nil
+}
+
+// envelopeFrom builds an envelope that reuses an inbound message ID and timestamp.
+// Used when forwarding so crypto/rand is not required on the relay path.
+func envelopeFrom(msgType uint64, sender, msgID []byte, ts uint64) (*Envelope, error) {
+	if len(sender) != IdentityLength {
+		return nil, fmt.Errorf("%w: sender identity", ErrBadFieldLength)
+	}
+	if len(msgID) != MessageIDLength {
+		return nil, fmt.Errorf("%w: message id", ErrBadFieldLength)
+	}
+	return &Envelope{
+		Version:   ProtocolVersion,
+		Type:      msgType,
+		MsgID:     cloneBytes(msgID),
+		Timestamp: ts,
+		Sender:    cloneBytes(sender),
 	}, nil
 }
 
@@ -59,13 +113,12 @@ func (e *Envelope) Marshal() ([]byte, error) {
 		return nil, fmt.Errorf("%w: sender identity", ErrBadFieldLength)
 	}
 
-	m := map[uint64]any{
-		KeyVersion:   e.Version,
-		KeyType:      e.Type,
-		KeyMsgID:     e.MsgID,
-		KeyTimestamp: e.Timestamp,
-		KeySender:    e.Sender,
-	}
+	m := make(map[uint64]any, 9)
+	m[KeyVersion] = e.Version
+	m[KeyType] = e.Type
+	m[KeyMsgID] = e.MsgID
+	m[KeyTimestamp] = e.Timestamp
+	m[KeySender] = e.Sender
 	if e.HasRoom {
 		m[KeyRoom] = e.Room
 	}
@@ -81,7 +134,17 @@ func (e *Envelope) Marshal() ([]byte, error) {
 		}
 		m[KeyDestination] = e.Destination
 	}
-	return cbor.Marshal(m)
+
+	buf := marshalBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	if err := envelopeEnc.MarshalToBuffer(m, buf); err != nil {
+		marshalBufPool.Put(buf)
+		return nil, err
+	}
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	marshalBufPool.Put(buf)
+	return out, nil
 }
 
 // UnmarshalEnvelope decodes a CBOR map into an Envelope, ignoring unknown keys.
@@ -89,8 +152,11 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 	if len(data) == 0 {
 		return nil, ErrInvalidEnvelope
 	}
+	if len(data) > MaxEnvelopeBytes {
+		return nil, ErrEnvelopeTooLarge
+	}
 	var raw map[uint64]any
-	if err := cbor.Unmarshal(data, &raw); err != nil {
+	if err := envelopeDec.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidEnvelope, err)
 	}
 
@@ -117,7 +183,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 	if len(msgID) != MessageIDLength {
 		return nil, fmt.Errorf("%w: message id", ErrBadFieldLength)
 	}
-	e.MsgID = msgID
+	e.MsgID = cloneBytes(msgID)
 
 	ts, ok := asUint64(raw[KeyTimestamp])
 	if !ok {
@@ -132,7 +198,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 	if len(sender) != IdentityLength {
 		return nil, fmt.Errorf("%w: sender identity", ErrBadFieldLength)
 	}
-	e.Sender = sender
+	e.Sender = cloneBytes(sender)
 
 	if v, present := raw[KeyRoom]; present {
 		s, ok := v.(string)
@@ -143,7 +209,11 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 		e.HasRoom = true
 	}
 	if v, present := raw[KeyBody]; present {
-		e.Body = v
+		if b, isBytes := v.([]byte); isBytes {
+			e.Body = cloneBytes(b)
+		} else {
+			e.Body = v
+		}
 		e.HasBody = true
 	}
 	if v, present := raw[KeyNick]; present {
@@ -162,7 +232,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 		if len(dst) != IdentityLength {
 			return nil, fmt.Errorf("%w: destination identity", ErrBadFieldLength)
 		}
-		e.Destination = dst
+		e.Destination = cloneBytes(dst)
 		e.HasDestination = true
 	}
 	return e, nil

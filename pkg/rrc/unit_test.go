@@ -145,7 +145,7 @@ func TestUnit_ClientCloseIdempotent(t *testing.T) {
 }
 
 func TestUnit_HubRoomMembersEmpty(t *testing.T) {
-	h := &Hub{rooms: map[string]map[string]struct{}{}, peers: map[string]*hubPeer{}}
+	h := &Hub{rooms: map[string]map[peerID]struct{}{}, peers: map[peerID]*hubPeer{}}
 	if len(h.RoomMembers("#x")) != 0 {
 		t.Fatal("expected empty")
 	}

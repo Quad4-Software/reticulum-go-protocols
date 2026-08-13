@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding"
 	"errors"
 	"fmt"
 	"runtime"
@@ -38,13 +39,13 @@ func StampWorkblock(material []byte, expandRounds int) ([]byte, error) {
 	}
 
 	out := make([]byte, 0, 256*expandRounds)
+	saltSrc := make([]byte, 0, len(material)+16)
 	for n := range expandRounds {
 		nBytes, err := msgpack.Marshal(n)
 		if err != nil {
 			return nil, fmt.Errorf("lxmf: workblock msgpack: %w", err)
 		}
-		saltSrc := make([]byte, 0, len(material)+len(nBytes))
-		saltSrc = append(saltSrc, material...)
+		saltSrc = append(saltSrc[:0], material...)
 		saltSrc = append(saltSrc, nBytes...)
 		saltSum := sha256.Sum256(saltSrc)
 		block, err := cryptography.DeriveKey(material, saltSum[:], nil, 256)
@@ -56,15 +57,21 @@ func StampWorkblock(material []byte, expandRounds int) ([]byte, error) {
 	return out, nil
 }
 
+func hashWorkblockStamp(workblock, stamp []byte) [32]byte {
+	h := sha256.New()
+	h.Write(workblock)
+	h.Write(stamp)
+	var sum [32]byte
+	h.Sum(sum[:0])
+	return sum
+}
+
 // StampValue returns the leading-zero-bit score of SHA256(workblock||stamp).
 func StampValue(workblock, stamp []byte) int {
 	if len(stamp) == 0 {
 		return 0
 	}
-	buf := make([]byte, 0, len(workblock)+len(stamp))
-	buf = append(buf, workblock...)
-	buf = append(buf, stamp...)
-	sum := sha256.Sum256(buf)
+	sum := hashWorkblockStamp(workblock, stamp)
 
 	value := 0
 	for _, b := range sum {
@@ -94,12 +101,9 @@ func StampValid(stamp []byte, targetCost int, workblock []byte) bool {
 	if targetCost > 256 {
 		return false
 	}
-	target := stampTargetBytes(targetCost)
-	buf := make([]byte, 0, len(workblock)+len(stamp))
-	buf = append(buf, workblock...)
-	buf = append(buf, stamp...)
-	sum := sha256.Sum256(buf)
-	return bytes.Compare(sum[:], target) <= 0
+	sum := hashWorkblockStamp(workblock, stamp)
+	target := stampTarget(targetCost)
+	return bytes.Compare(sum[:], target[:]) <= 0
 }
 
 // ValidatePNStamp checks PN transient data (LXMF bytes + 32-byte stamp) and returns ids and stamp on success.
@@ -142,7 +146,7 @@ func GenerateStamp(ctx context.Context, messageID []byte, stampCost, expandRound
 	if err != nil {
 		return nil, 0, err
 	}
-	target := stampTargetBytes(stampCost)
+	target := stampTarget(stampCost)
 
 	workers := max(runtime.NumCPU(), 1)
 
@@ -154,11 +158,28 @@ func GenerateStamp(ctx context.Context, messageID []byte, stampCost, expandRound
 	subCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	base := sha256.New()
+	base.Write(wb)
+	mar, ok := base.(encoding.BinaryMarshaler)
+	var midState []byte
+	if ok {
+		midState, err = mar.MarshalBinary()
+		if err != nil {
+			midState = nil
+		}
+	}
+
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Go(func() {
 			candidate := make([]byte, StampSize)
-			buf := make([]byte, 0, len(wb)+StampSize)
+			h := sha256.New()
+			un, unOK := h.(encoding.BinaryUnmarshaler)
+			useMid := unOK && len(midState) > 0
+			var concat []byte
+			if !useMid {
+				concat = make([]byte, 0, len(wb)+StampSize)
+			}
 			for {
 				select {
 				case <-subCtx.Done():
@@ -168,10 +189,19 @@ func GenerateStamp(ctx context.Context, messageID []byte, stampCost, expandRound
 				if _, err := rand.Read(candidate); err != nil {
 					return
 				}
-				buf = append(buf[:0], wb...)
-				buf = append(buf, candidate...)
-				sum := sha256.Sum256(buf)
-				if bytes.Compare(sum[:], target) <= 0 {
+				var sum [32]byte
+				if useMid {
+					if err := un.UnmarshalBinary(midState); err != nil {
+						return
+					}
+					h.Write(candidate)
+					h.Sum(sum[:0])
+				} else {
+					concat = append(concat[:0], wb...)
+					concat = append(concat, candidate...)
+					sum = sha256.Sum256(concat)
+				}
+				if bytes.Compare(sum[:], target[:]) <= 0 {
 					stamp := append([]byte(nil), candidate...)
 					select {
 					case resCh <- result{stamp: stamp}:
@@ -203,8 +233,7 @@ func GenerateStampWithDeadline(parent context.Context, messageID []byte, stampCo
 	return GenerateStamp(ctx, messageID, stampCost, expandRounds)
 }
 
-func stampTargetBytes(cost int) []byte {
-	target := make([]byte, 32)
+func stampTarget(cost int) (target [32]byte) {
 	if cost >= 256 {
 		return target
 	}

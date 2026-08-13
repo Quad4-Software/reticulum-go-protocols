@@ -106,4 +106,6 @@ const (
 	DefaultMaxMsgBodyBytes        = 350
 	DefaultRateLimitMsgsPerMinute = 60
 	DefaultMaxResourceBytes       = 262144
+	// MaxEnvelopeBytes is the inbound CBOR envelope size cap.
+	MaxEnvelopeBytes = 64 << 10
 )

@@ -304,8 +304,8 @@ func TestAdversarial_ApplyInboundNickUnit(t *testing.T) {
 
 func TestAdversarial_DropPeerIfIgnoresStale(t *testing.T) {
 	h := &Hub{
-		peers: map[string]*hubPeer{},
-		rooms: map[string]map[string]struct{}{},
+		peers: map[peerID]*hubPeer{},
+		rooms: map[string]map[peerID]struct{}{},
 	}
 	hash := bytes.Repeat([]byte{0x01}, IdentityLength)
 	old := &hubPeer{peerHash: hash, rooms: map[string]struct{}{}}

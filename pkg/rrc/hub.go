@@ -85,8 +85,8 @@ type Hub struct {
 	id       *identity.Identity
 	sender   []byte
 	cfg      HubConfig
-	peers    map[string]*hubPeer
-	rooms    map[string]map[string]struct{} // room -> peerKey set
+	peers    map[peerID]*hubPeer
+	rooms    map[string]map[peerID]struct{}
 	handlers HubHandlers
 	started  bool
 }
@@ -107,8 +107,8 @@ func NewHub(tr *transport.Transport, dest *destination.Destination, cfg HubConfi
 		id:       id,
 		sender:   append([]byte(nil), id.Hash()...),
 		cfg:      cfg,
-		peers:    make(map[string]*hubPeer),
-		rooms:    make(map[string]map[string]struct{}),
+		peers:    make(map[peerID]*hubPeer),
+		rooms:    make(map[string]map[peerID]struct{}),
 		handlers: cfg.Handlers,
 	}
 	return h, nil
@@ -144,14 +144,27 @@ func (h *Hub) DestinationHash() []byte {
 	return h.dest.GetHash()
 }
 
-func peerKey(hash []byte) string {
-	return string(hash)
+type peerID [IdentityLength]byte
+
+func peerKey(hash []byte) peerID {
+	var k peerID
+	if len(hash) == IdentityLength {
+		copy(k[:], hash)
+	}
+	return k
 }
 
 func (h *Hub) acceptLink(lnk *link.Link) {
+	rateCap := int(h.cfg.Limits.RateLimitMsgsPerMinute)
+	if rateCap < 8 {
+		rateCap = 8
+	}
+	if rateCap > 256 {
+		rateCap = 256
+	}
 	p := &hubPeer{
 		rooms:    make(map[string]struct{}),
-		msgTimes: make([]time.Time, 0, 8),
+		msgTimes: make([]time.Time, 0, rateCap),
 	}
 
 	var registerOnce sync.Once
@@ -396,7 +409,7 @@ func (h *Hub) onJoin(p *hubPeer, env *Envelope) {
 		}
 		p.rooms[room] = struct{}{}
 		if h.rooms[room] == nil {
-			h.rooms[room] = make(map[string]struct{})
+			h.rooms[room] = make(map[peerID]struct{})
 		}
 		h.rooms[room][key] = struct{}{}
 	}
@@ -489,8 +502,9 @@ func (h *Hub) onRoomContent(p *hubPeer, env *Envelope) {
 		_ = h.sendError(p, "not a member of room")
 		return
 	}
-	members := make([]*hubPeer, 0)
-	for pk := range h.rooms[room] {
+	roomMembers := h.rooms[room]
+	members := make([]*hubPeer, 0, len(roomMembers))
+	for pk := range roomMembers {
 		if peer, ok := h.peers[pk]; ok && peer.active {
 			members = append(members, peer)
 		}
@@ -500,12 +514,10 @@ func (h *Hub) onRoomContent(p *hubPeer, env *Envelope) {
 	h.mu.Unlock()
 
 	// Always stamp authenticated peer identity. Never trust wire Sender.
-	fwd, err := NewEnvelope(env.Type, p.peerHash)
+	fwd, err := envelopeFrom(env.Type, p.peerHash, env.MsgID, env.Timestamp)
 	if err != nil {
 		return
 	}
-	fwd.MsgID = append([]byte(nil), env.MsgID...)
-	fwd.Timestamp = env.Timestamp
 	fwd.Room = room
 	fwd.HasRoom = true
 	if env.HasBody {
@@ -552,7 +564,7 @@ func (h *Hub) sendError(p *hubPeer, msg string) error {
 	return p.sess.sendType(TypeError, "", msg, "")
 }
 
-func (h *Hub) roomPeersLocked(room, exceptKey string) []*hubPeer {
+func (h *Hub) roomPeersLocked(room string, exceptKey peerID) []*hubPeer {
 	members := h.rooms[room]
 	out := make([]*hubPeer, 0, len(members))
 	for pk := range members {
@@ -595,13 +607,11 @@ func (h *Hub) onDirectNotice(p *hubPeer, env *Envelope) {
 		return
 	}
 
-	fwd, err := NewEnvelope(TypeNotice, p.peerHash)
+	fwd, err := envelopeFrom(TypeNotice, p.peerHash, env.MsgID, env.Timestamp)
 	if err != nil {
 		return
 	}
-	fwd.MsgID = append([]byte(nil), env.MsgID...)
-	fwd.Timestamp = env.Timestamp
-	fwd.Destination = append([]byte(nil), env.Destination...)
+	fwd.Destination = cloneBytes(env.Destination)
 	fwd.HasDestination = true
 	if env.HasBody {
 		fwd.Body = env.Body
@@ -651,8 +661,8 @@ func (h *Hub) Close() {
 	for _, p := range h.peers {
 		peers = append(peers, p)
 	}
-	h.peers = make(map[string]*hubPeer)
-	h.rooms = make(map[string]map[string]struct{})
+	h.peers = make(map[peerID]*hubPeer)
+	h.rooms = make(map[string]map[peerID]struct{})
 	h.mu.Unlock()
 	for _, p := range peers {
 		p.sess.close()

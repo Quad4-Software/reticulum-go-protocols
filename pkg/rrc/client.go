@@ -97,13 +97,10 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 
 	welcomeCh := make(chan *Envelope, 1)
 	closedCh := make(chan struct{})
+	var closeOnce sync.Once
 
 	lnk := link.NewLink(destOut, tr, nil, nil, func(*link.Link) {
-		select {
-		case <-closedCh:
-		default:
-			close(closedCh)
-		}
+		closeOnce.Do(func() { close(closedCh) })
 		c.onLinkClosed()
 	})
 

@@ -17,6 +17,15 @@ func SanitizeNick(nick string) string {
 	if nick == "" {
 		return ""
 	}
+	for _, r := range nick {
+		if r == 0 || r == '\n' || r == '\r' || unicode.IsControl(r) {
+			return stripNickControls(nick)
+		}
+	}
+	return nick
+}
+
+func stripNickControls(nick string) string {
 	var b strings.Builder
 	b.Grow(len(nick))
 	for _, r := range nick {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"sync"
 	"time"
 
 	"quad4/msgpack/v5/pkg/msgpack"
@@ -244,11 +245,13 @@ func (m *LXMessage) ValidateStamp(targetCost int, tickets [][]byte) (bool, error
 }
 
 func truncatedHash(ticket, messageID []byte) []byte {
-	buf := make([]byte, 0, len(ticket)+len(messageID))
-	buf = append(buf, ticket...)
-	buf = append(buf, messageID...)
-	sum := sha256.Sum256(buf)
-	return sum[:DestinationLength]
+	var buf [TicketLength + sha256.Size]byte
+	n := copy(buf[:], ticket)
+	n += copy(buf[n:], messageID)
+	sum := sha256.Sum256(buf[:n])
+	out := make([]byte, DestinationLength)
+	copy(out, sum[:DestinationLength])
+	return out
 }
 
 func (m *LXMessage) String() string {
@@ -287,17 +290,14 @@ func (m *LXMessage) Pack(signer Signer) ([]byte, error) {
 		return nil, fmt.Errorf("encode payload: %w", err)
 	}
 
-	hashedPart := make([]byte, 0, len(m.DestinationHash)+len(m.SourceHash)+len(hashedPayload))
-	hashedPart = append(hashedPart, m.DestinationHash...)
-	hashedPart = append(hashedPart, m.SourceHash...)
-	hashedPart = append(hashedPart, hashedPayload...)
-
-	hash := sha256.Sum256(hashedPart)
-	m.Hash = hash[:]
-
-	signedPart := make([]byte, 0, len(hashedPart)+len(m.Hash))
-	signedPart = append(signedPart, hashedPart...)
-	signedPart = append(signedPart, m.Hash...)
+	hashedLen := 2*DestinationLength + len(hashedPayload)
+	signedPart := make([]byte, hashedLen+sha256.Size)
+	copy(signedPart[0:DestinationLength], m.DestinationHash)
+	copy(signedPart[DestinationLength:2*DestinationLength], m.SourceHash)
+	copy(signedPart[2*DestinationLength:hashedLen], hashedPayload)
+	sum := sha256.Sum256(signedPart[:hashedLen])
+	m.Hash = append([]byte(nil), sum[:]...)
+	copy(signedPart[hashedLen:], sum[:])
 
 	signature, err := signer.Sign(signedPart)
 	if err != nil {
@@ -424,17 +424,14 @@ func UnpackFromBytes(destinationHash, inner []byte, resolver SourceResolver) (*L
 		return nil, err
 	}
 
-	hashedPart := make([]byte, 0, 2*DestinationLength+len(hashedPayload))
-	hashedPart = append(hashedPart, destinationHash...)
-	hashedPart = append(hashedPart, source...)
-	hashedPart = append(hashedPart, hashedPayload...)
-
-	hash := sha256.Sum256(hashedPart)
-	m.Hash = hash[:]
-
-	signedPart := make([]byte, 0, len(hashedPart)+len(m.Hash))
-	signedPart = append(signedPart, hashedPart...)
-	signedPart = append(signedPart, m.Hash...)
+	hashedLen := 2*DestinationLength + len(hashedPayload)
+	signedPart := make([]byte, hashedLen+sha256.Size)
+	copy(signedPart[0:DestinationLength], destinationHash)
+	copy(signedPart[DestinationLength:2*DestinationLength], source)
+	copy(signedPart[2*DestinationLength:hashedLen], hashedPayload)
+	sum := sha256.Sum256(signedPart[:hashedLen])
+	m.Hash = append([]byte(nil), sum[:]...)
+	copy(signedPart[hashedLen:], sum[:])
 
 	packed := make([]byte, 0, 2*DestinationLength+SignatureLength+len(packedPayload))
 	packed = append(packed, destinationHash...)
@@ -532,16 +529,25 @@ func (m *LXMessage) applyPayload(payload []any) error {
 	return nil
 }
 
+var payloadBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
 func encodePayload(payload []any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := msgpack.NewEncoder(&buf)
+	buf := payloadBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	enc := msgpack.NewEncoder(buf)
 	enc.UseCompactInts(true)
 	enc.UseCompactFloats(false)
 	enc.UseInternedStrings(false)
 	if err := enc.Encode(payload); err != nil {
+		payloadBufPool.Put(buf)
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	payloadBufPool.Put(buf)
+	return out, nil
 }
 
 // decodePayloadAndSplit decodes payload and preserves raw bytes for hashing (multi-field map order stability).
@@ -604,8 +610,8 @@ func decodePayloadAndSplit(data []byte) ([]any, []byte, error) {
 
 // msgpack map decode limits (DoS bounds).
 const (
-	msgpackMapMaxDepth = 32
-	msgpackMapMaxPairs = 8192
+	msgpackMapMaxDepth = 16
+	msgpackMapMaxPairs = 1024
 )
 
 type msgpackMapCtx struct {
