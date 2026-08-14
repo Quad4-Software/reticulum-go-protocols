@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"quad4/reticulum-go/pkg/common"
 	"quad4/reticulum-go/pkg/identity"
+	"quad4/reticulum-go/pkg/interfaces"
+	"quad4/reticulum-go/pkg/transport"
 )
 
 func TestInterop_Ping(t *testing.T) {
@@ -651,5 +654,112 @@ func TestInterop_BinaryContent(t *testing.T) {
 	})
 	if !resp.Message.SignatureValidated {
 		t.Fatal("signature")
+	}
+}
+
+func TestInterop_Live_GoMessengerPythonRecv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live python interop skipped in -short mode")
+	}
+	requireInterop(t)
+
+	const (
+		goPort = 42940
+		pyPort = 42941
+		udpGo  = "LXMFIGO"
+	)
+
+	cfg := common.DefaultConfig()
+	cfg.Interfaces = map[string]*common.InterfaceConfig{
+		udpGo: {Type: "UDPInterface", Enabled: true, Address: "127.0.0.1:0", TargetHost: "127.0.0.1:0", Name: udpGo},
+	}
+	tr := transport.NewTransport(cfg)
+	if err := tr.Start(); err != nil {
+		t.Fatalf("transport: %v", err)
+	}
+	defer tr.Close()
+
+	id, err := identity.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var iface interfaces.Interface
+	iface, err = interfaces.NewUDPInterface(udpGo, "127.0.0.1:42940", "127.0.0.1:42941", true)
+	if err != nil {
+		t.Fatalf("udp: %v", err)
+	}
+	iface.SetPacketCallback(func(d []byte, ni common.NetworkInterface) { tr.HandlePacket(d, ni) })
+	if err := iface.Start(); err != nil {
+		t.Fatalf("udp start: %v", err)
+	}
+	defer iface.Stop()
+	if ni, ok := iface.(common.NetworkInterface); ok {
+		if err := tr.RegisterInterface(udpGo, ni); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+	}
+
+	messenger, err := NewDeliveryMessenger(id, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readyPath := t.TempDir() + "/ready.json"
+	wantText := "hello from go lxmf"
+	type liveResult struct {
+		resp interopResponse
+		err  error
+	}
+	liveCh := make(chan liveResult, 1)
+	go func() {
+		resp, err := runInterop(map[string]any{
+			"cmd":          "live_recv",
+			"listen_port":  pyPort,
+			"forward_port": goPort,
+			"ready_path":   readyPath,
+			"timeout_s":    40,
+		})
+		liveCh <- liveResult{resp, err}
+	}()
+
+	ready := waitReadyJSON(t, readyPath, 15*time.Second)
+	dstHash, err := hex.DecodeString(ready["dest_hash"])
+	if err != nil || len(dstHash) != DestinationLength {
+		t.Fatalf("dest_hash=%q err=%v", ready["dest_hash"], err)
+	}
+	pub, err := hex.DecodeString(ready["public_key"])
+	if err != nil || len(pub) == 0 {
+		t.Fatalf("public_key=%q err=%v", ready["public_key"], err)
+	}
+	identity.Remember(nil, dstHash, pub, nil)
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !tr.HasPath(dstHash) {
+		if time.Now().After(deadline) {
+			t.Fatal("path timeout to python lxmf dest")
+		}
+		_ = tr.RequestPath(dstHash, "", nil, true)
+		_ = messenger.Destination().Announce(false, nil, nil)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if _, err := messenger.SendText(dstHash, "live", wantText); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	select {
+	case lr := <-liveCh:
+		if lr.err != nil {
+			t.Fatalf("live recv: %v", lr.err)
+		}
+		if !lr.resp.OK {
+			t.Fatalf("live recv error: %s\n%s", lr.resp.Error, lr.resp.Trace)
+		}
+		if lr.resp.Text != wantText {
+			t.Fatalf("python text=%q", lr.resp.Text)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("timeout waiting for python lxmf result")
 	}
 }

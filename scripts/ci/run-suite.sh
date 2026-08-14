@@ -38,6 +38,11 @@ test-race)
 	"$GOCMD" test -race -short -count=1 -timeout 20m \
 		./internal/leaktest/... ./pkg/lxmf/... ./pkg/mf/... ./pkg/rrc/...
 	;;
+live)
+	"$GOCMD" test -count=1 -timeout 25m \
+		-run 'Test(E2E_|HubClientLoopback|Messenger_TwoWay)' \
+		./pkg/mf/... ./pkg/lxmf/... ./pkg/rrc/...
+	;;
 examples)
 	# examples/*.go use //go:build ignore; single-file go build still type-checks them.
 	# lxmf_send.go needs reticulumconfig from a newer Reticulum-Go than this vendor pin.

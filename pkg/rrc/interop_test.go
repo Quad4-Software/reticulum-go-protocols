@@ -147,8 +147,8 @@ func TestInterop_Live_PythonClientGoHub(t *testing.T) {
 	requireInterop(t)
 
 	const (
-		goPort = 42620
-		pyPort = 42621
+		goPort = 42920
+		pyPort = 42921
 		udpGo  = "RRCIGO"
 	)
 
@@ -164,7 +164,7 @@ func TestInterop_Live_PythonClientGoHub(t *testing.T) {
 
 	var iface interfaces.Interface
 	var err error
-	iface, err = interfaces.NewUDPInterface(udpGo, "127.0.0.1:42620", "127.0.0.1:42621", true)
+	iface, err = interfaces.NewUDPInterface(udpGo, "127.0.0.1:42920", "127.0.0.1:42921", true)
 	if err != nil {
 		t.Fatalf("udp: %v", err)
 	}
@@ -265,6 +265,136 @@ liveDone:
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for python MSG at go hub")
+	}
+}
+
+func TestInterop_Live_GoClientPythonHub(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live python interop skipped in -short mode")
+	}
+	requireInterop(t)
+
+	const (
+		goPort = 42930
+		pyPort = 42931
+		udpGo  = "RRCGOPY"
+	)
+
+	cfg := common.DefaultConfig()
+	cfg.Interfaces = map[string]*common.InterfaceConfig{
+		udpGo: {Type: "UDPInterface", Enabled: true, Address: "127.0.0.1:0", TargetHost: "127.0.0.1:0", Name: udpGo},
+	}
+	tr := transport.NewTransport(cfg)
+	if err := tr.Start(); err != nil {
+		t.Fatalf("transport: %v", err)
+	}
+	defer tr.Close()
+
+	id, err := identity.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var iface interfaces.Interface
+	iface, err = interfaces.NewUDPInterface(udpGo, "127.0.0.1:42930", "127.0.0.1:42931", true)
+	if err != nil {
+		t.Fatalf("udp: %v", err)
+	}
+	iface.SetPacketCallback(func(d []byte, ni common.NetworkInterface) { tr.HandlePacket(d, ni) })
+	if err := iface.Start(); err != nil {
+		t.Fatalf("udp start: %v", err)
+	}
+	defer iface.Stop()
+	if ni, ok := iface.(common.NetworkInterface); ok {
+		if err := tr.RegisterInterface(udpGo, ni); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+	}
+
+	readyPath := t.TempDir() + "/ready.json"
+	wantText := "hello from go client"
+	type liveResult struct {
+		resp interopResponse
+		err  error
+	}
+	liveCh := make(chan liveResult, 1)
+	go func() {
+		resp, err := runInterop(map[string]any{
+			"cmd":          "live_hub",
+			"listen_port":  pyPort,
+			"forward_port": goPort,
+			"ready_path":   readyPath,
+			"timeout_s":    40,
+			"hub_name":     "py-live-hub",
+		})
+		liveCh <- liveResult{resp, err}
+	}()
+
+	ready := waitReadyJSON(t, readyPath, 15*time.Second)
+	hubHash, err := hex.DecodeString(ready["hub_hash"])
+	if err != nil || len(hubHash) != IdentityLength {
+		t.Fatalf("hub_hash=%q err=%v", ready["hub_hash"], err)
+	}
+	pub, err := hex.DecodeString(ready["public_key"])
+	if err != nil || len(pub) == 0 {
+		t.Fatalf("public_key=%q err=%v", ready["public_key"], err)
+	}
+	identity.Remember(nil, hubHash, pub, nil)
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !tr.HasPath(hubHash) {
+		if time.Now().After(deadline) {
+			t.Fatal("path timeout to python hub")
+		}
+		_ = tr.RequestPath(hubHash, "", nil, true)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	joined := make(chan struct{}, 1)
+	client, err := Dial(tr, id, hubHash, ClientConfig{
+		Nick: "go-alice",
+		Name: "go-live",
+		Handlers: ClientHandlers{
+			OnJoined: func(room string, _ [][]byte, _ *Envelope) {
+				if room == "#lobby" {
+					select {
+					case joined <- struct{}{}:
+					default:
+					}
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("dial python hub: %v", err)
+	}
+	defer client.Close()
+
+	if err := client.Join("#lobby"); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	select {
+	case <-joined:
+	case <-time.After(15 * time.Second):
+		t.Fatal("timeout waiting for JOINED from python hub")
+	}
+	if err := client.SendMsg("#lobby", wantText); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	select {
+	case lr := <-liveCh:
+		if lr.err != nil {
+			t.Fatalf("live hub: %v", lr.err)
+		}
+		if !lr.resp.OK {
+			t.Fatalf("live hub error: %s\n%s", lr.resp.Error, lr.resp.Trace)
+		}
+		if lr.resp.Text != wantText {
+			t.Fatalf("python hub text=%q", lr.resp.Text)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("timeout waiting for python hub result")
 	}
 }
 

@@ -115,7 +115,7 @@ tasks:
   test:lxmf:interop:
     desc: Run LXMF Go-Python interop tests via uv (requires LXMF-ref clone and uv)
     cmds:
-      - '{{.GOCMD}} test -v -count=1 -run TestInterop ./pkg/lxmf/...'
+      - '{{.GOCMD}} test -v -count=1 -timeout 15m -run TestInterop ./pkg/lxmf/...'
 
   test:rrc:
     desc: Run all RRC unit and loopback tests
@@ -145,7 +145,12 @@ tasks:
   test:rrc:interop:
     desc: Run RRC Go-Python interop tests via uv (requires RRC-ref clone and uv)
     cmds:
-      - '{{.GOCMD}} test -v -count=1 -run TestInterop ./pkg/rrc/...'
+      - '{{.GOCMD}} test -v -count=1 -timeout 15m -run TestInterop ./pkg/rrc/...'
+
+  test:live:
+    desc: Live Go-to-Go mesh tests (hub/client, LXMF messengers, MF two-way)
+    cmds:
+      - "{{.GOCMD}} test -v -count=1 -timeout 25m -run='Test(E2E_|HubClientLoopback|Messenger_TwoWay)' ./pkg/mf/... ./pkg/lxmf/... ./pkg/rrc/..."
 
   coverage:
     desc: Generate test coverage report

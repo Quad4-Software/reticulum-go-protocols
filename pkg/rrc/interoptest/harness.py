@@ -22,6 +22,17 @@ from rrcd.constants import (
     B_HELLO_CAPS,
     B_HELLO_NAME,
     B_HELLO_VER,
+    B_LIMIT_MAX_MSG_BODY_BYTES,
+    B_LIMIT_MAX_NICK_BYTES,
+    B_LIMIT_MAX_ROOM_NAME_BYTES,
+    B_LIMIT_MAX_ROOMS_PER_SESSION,
+    B_LIMIT_RATE_LIMIT_MSGS_PER_MINUTE,
+    B_WELCOME_CAPS,
+    B_WELCOME_HUB,
+    B_WELCOME_LIMITS,
+    B_WELCOME_VER,
+    CAP_ACTION,
+    CAP_DIRECT_NOTICE,
     K_BODY,
     K_DST,
     K_ID,
@@ -293,6 +304,109 @@ def cmd_live_client(req: dict[str, Any]) -> dict[str, Any]:
             pass
 
 
+def cmd_live_hub(req: dict[str, Any]) -> dict[str, Any]:
+    """Run a minimal rrc.hub over UDP and wait for a client MSG."""
+    listen_port = int(req["listen_port"])
+    forward_port = int(req["forward_port"])
+    ready_path = req["ready_path"]
+    timeout_s = float(req.get("timeout_s", 40))
+    hub_name = req.get("hub_name", "py-interop-hub")
+
+    configdir = Path(tempfile.mkdtemp(prefix="rrc-interop-hub-"))
+    try:
+        _write_rns_config(configdir, listen_port, forward_port)
+        _reticulum = RNS.Reticulum(str(configdir))
+        identity = RNS.Identity()
+        dest = RNS.Destination(
+            identity,
+            RNS.Destination.IN,
+            RNS.Destination.SINGLE,
+            "rrc",
+            "hub",
+        )
+
+        got_text: dict[str, str] = {}
+        msg_ev = threading.Event()
+
+        def on_link(link: RNS.Link) -> None:
+            def on_packet(message: bytes, packet: Any) -> None:
+                try:
+                    env = rrc_decode(message)
+                    validate_envelope(env)
+                except Exception:
+                    return
+                t = int(env[K_T])
+                src = identity.hash
+                if t == T_HELLO:
+                    welcome = make_envelope(
+                        T_WELCOME,
+                        src=src,
+                        body={
+                            B_WELCOME_HUB: hub_name,
+                            B_WELCOME_VER: "0.1.0",
+                            B_WELCOME_CAPS: {
+                                CAP_ACTION: True,
+                                CAP_DIRECT_NOTICE: True,
+                            },
+                            B_WELCOME_LIMITS: {
+                                B_LIMIT_MAX_NICK_BYTES: 32,
+                                B_LIMIT_MAX_ROOM_NAME_BYTES: 64,
+                                B_LIMIT_MAX_MSG_BODY_BYTES: 350,
+                                B_LIMIT_MAX_ROOMS_PER_SESSION: 32,
+                                B_LIMIT_RATE_LIMIT_MSGS_PER_MINUTE: 60,
+                            },
+                        },
+                    )
+                    _link_send(link, rrc_encode(welcome))
+                elif t == T_JOIN:
+                    room = env.get(K_ROOM) or "#lobby"
+                    joined = make_envelope(T_JOINED, src=src, room=room)
+                    _link_send(link, rrc_encode(joined))
+                elif t == T_MSG:
+                    body = env.get(K_BODY)
+                    if isinstance(body, str):
+                        got_text["text"] = body
+                    elif isinstance(body, (bytes, bytearray)):
+                        got_text["text"] = bytes(body).decode("utf-8", errors="replace")
+                    else:
+                        got_text["text"] = str(body)
+                    msg_ev.set()
+
+            link.set_packet_callback(on_packet)
+
+        dest.set_link_established_callback(on_link)
+
+        Path(ready_path).write_text(
+            json.dumps(
+                {
+                    "hub_hash": _hex(dest.hash),
+                    "public_key": _hex(identity.get_public_key()),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            dest.announce()
+            if msg_ev.wait(timeout=0.4):
+                break
+
+        if not msg_ev.is_set():
+            return {"ok": False, "error": "timeout waiting for client MSG"}
+
+        return {
+            "ok": True,
+            "hub_hash": _hex(dest.hash),
+            "text": got_text.get("text", ""),
+        }
+    finally:
+        try:
+            shutil.rmtree(configdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 def handle(req: dict[str, Any]) -> dict[str, Any]:
     cmd = req.get("cmd")
     if cmd == "ping":
@@ -305,6 +419,8 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
         return cmd_validate(req)
     if cmd == "live_client":
         return cmd_live_client(req)
+    if cmd == "live_hub":
+        return cmd_live_hub(req)
     return {"ok": False, "error": f"unknown cmd: {cmd!r}"}
 
 

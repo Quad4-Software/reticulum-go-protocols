@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
 type interopResponse struct {
@@ -34,6 +35,9 @@ type interopResponse struct {
 	WelcomeBody map[string]any `json:"welcome_body,omitempty"`
 	Text        string         `json:"text,omitempty"`
 	Destination string         `json:"destination,omitempty"`
+	HubHash     string         `json:"hub_hash,omitempty"`
+	PublicKey   string         `json:"public_key,omitempty"`
+	ReadyPath   string         `json:"ready_path,omitempty"`
 }
 
 var (
@@ -127,6 +131,9 @@ func requireInterop(t *testing.T) {
 	t.Helper()
 	ok, msg := interopAvailable()
 	if !ok {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("interop required in CI: %s", msg)
+		}
 		t.Skip(msg)
 	}
 }
@@ -157,5 +164,23 @@ func bodyToJSON(v any) any {
 		return x
 	default:
 		return x
+	}
+}
+
+func waitReadyJSON(t *testing.T, path string, timeout time.Duration) map[string]string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && len(raw) > 0 {
+			var out map[string]string
+			if json.Unmarshal(raw, &out) == nil && len(out) > 0 {
+				return out
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for ready file %s", path)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

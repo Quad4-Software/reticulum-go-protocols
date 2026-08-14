@@ -89,7 +89,7 @@ Other entry points:
 - `lxmf.Unpack` / `UnpackFromBytes` for bytes that did not arrive through `Messenger`
 - `DisplayNameFromAppData`, `StampCostFromAppData`, and `EncodeAnnounceAppData*` for announce metadata
 
-Python round-trips (`TestInterop`) need `uv` and `LXMF-ref`. Run them with `task test:lxmf:interop`.
+Python round-trips (`TestInterop`) need `uv` and `LXMF-ref`. Run them with `task test:lxmf:interop`. Live UDP (`TestInterop_Live_*`) is skipped under `-short` and is required when `CI=1`.
 
 See `examples/lxmf_send.go` for a two-node UDP sender.
 
@@ -132,7 +132,9 @@ if err := client.Join("#lobby"); err != nil {
 
 Wait for `OnJoined` before `SendMsg`. Tests: `task test:rrc` or `go test ./pkg/rrc/...`.
 
-Python codec checks use [rrcd](https://github.com/kc1awv/rrcd) via `uv`. Clone it to `RRC-ref`, then `task test:rrc:interop`. The live UDP case `TestInterop_Live_PythonClientGoHub` is skipped under `-short`.
+Python codec checks use [rrcd](https://github.com/kc1awv/rrcd) via `uv`. Clone it to `RRC-ref`, then `task test:rrc:interop`. Live UDP cases (`TestInterop_Live_PythonClientGoHub`, `TestInterop_Live_GoClientPythonHub`) are skipped under `-short` and are required when `CI=1`.
+
+Go-to-Go hub and client mesh tests: `task test:live`.
 
 Slash commands, IRC-style room modes, and RNS Resource blob transfer are rrcd hub extras. This package implements the envelope and hub policy for type 50, not the blob transfer itself.
 
@@ -156,6 +158,7 @@ task check
 | RRC tests | `task test:rrc` |
 | MF two-way messenger | `task test:messenger` |
 | Benchmarks | `task bench` |
+| Live Go mesh | `task test:live` |
 | Fuzz | `task fuzz` |
 | Refresh `vendor/` | `task deps` |
 

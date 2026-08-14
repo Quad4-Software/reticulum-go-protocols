@@ -5,8 +5,13 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import sys
+import tempfile
+import threading
+import time
 import traceback
+from pathlib import Path
 from typing import Any
 
 import RNS
@@ -319,6 +324,97 @@ def cmd_ticket_stamp(req: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "stamp": _hex(stamp)}
 
 
+def _write_rns_config(configdir: Path, listen_port: int, forward_port: int) -> None:
+    configdir.mkdir(parents=True, exist_ok=True)
+    (configdir / "storage").mkdir(exist_ok=True)
+    (configdir / "storage" / "identities").mkdir(exist_ok=True)
+    cfg = f"""[reticulum]
+  enable_transport = Yes
+  share_instance = No
+  shared_instance_port = 0
+  instance_name = lxmf-interop-{listen_port}
+
+[logging]
+  loglevel = 0
+
+[interfaces]
+
+  [[UDP Interface]]
+    type = UDPInterface
+    interface_enabled = True
+    listen_ip = 127.0.0.1
+    listen_port = {listen_port}
+    forward_ip = 127.0.0.1
+    forward_port = {forward_port}
+"""
+    (configdir / "config").write_text(cfg, encoding="utf-8")
+
+
+def cmd_live_recv(req: dict[str, Any]) -> dict[str, Any]:
+    """Inbound lxmf.delivery destination that waits for one packed message from Go."""
+    listen_port = int(req["listen_port"])
+    forward_port = int(req["forward_port"])
+    ready_path = req["ready_path"]
+    timeout_s = float(req.get("timeout_s", 40))
+
+    configdir = Path(tempfile.mkdtemp(prefix="lxmf-interop-"))
+    try:
+        _write_rns_config(configdir, listen_port, forward_port)
+        _reticulum = RNS.Reticulum(str(configdir))
+        identity = RNS.Identity()
+        dest = RNS.Destination(
+            identity,
+            RNS.Destination.IN,
+            RNS.Destination.SINGLE,
+            LXMF.APP_NAME,
+            "delivery",
+        )
+
+        got: dict[str, str] = {}
+        ev = threading.Event()
+
+        def on_packet(data: bytes, packet: Any) -> None:
+            try:
+                msg = LXMessage.unpack_from_bytes(data)
+            except Exception:
+                return
+            if msg is None:
+                return
+            got["text"] = _as_text(msg.content)
+            ev.set()
+
+        dest.set_packet_callback(on_packet)
+        Path(ready_path).write_text(
+            json.dumps(
+                {
+                    "dest_hash": _hex(dest.hash),
+                    "public_key": _hex(identity.get_public_key()),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            dest.announce()
+            if ev.wait(timeout=0.4):
+                break
+
+        if not ev.is_set():
+            return {"ok": False, "error": "timeout waiting for LXMF packet"}
+
+        return {
+            "ok": True,
+            "dest_hash": _hex(dest.hash),
+            "text": got.get("text", ""),
+        }
+    finally:
+        try:
+            shutil.rmtree(configdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 HANDLERS = {
     "ping": cmd_ping,
     "pack": cmd_pack,
@@ -335,6 +431,7 @@ HANDLERS = {
     "paper_uri": cmd_paper_uri,
     "paper_decode": cmd_paper_decode,
     "ticket_stamp": cmd_ticket_stamp,
+    "live_recv": cmd_live_recv,
 }
 
 
