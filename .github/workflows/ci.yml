@@ -238,6 +238,7 @@ jobs:
       - name: Run interop
         env:
           INTEROP_SUITE: ${{ matrix.suite }}
+          CI_REQUIRE_INTEROP: "1"
         run: sh scripts/ci/run-suite.sh "$INTEROP_SUITE"
 
       - name: Verify workspace clean

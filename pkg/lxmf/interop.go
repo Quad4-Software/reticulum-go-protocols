@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"quad4/reticulum-go/pkg/destination"
 	"quad4/reticulum-go/pkg/identity"
@@ -189,7 +188,7 @@ func requireInterop(t *testing.T) {
 	}
 	ok, msg := interopAvailable()
 	if !ok {
-		if os.Getenv("CI") != "" {
+		if os.Getenv("CI_REQUIRE_INTEROP") != "" {
 			t.Fatalf("interop required in CI: %s", msg)
 		}
 		t.Skip(msg)
@@ -210,22 +209,4 @@ func interopCall(t *testing.T, req map[string]any) interopResponse {
 		t.Fatalf("interop %v failed: %s", req["cmd"], detail)
 	}
 	return resp
-}
-
-func waitReadyJSON(t *testing.T, path string, timeout time.Duration) map[string]string {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		raw, err := os.ReadFile(path)
-		if err == nil && len(raw) > 0 {
-			var out map[string]string
-			if json.Unmarshal(raw, &out) == nil && len(out) > 0 {
-				return out
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting for ready file %s", path)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
 }

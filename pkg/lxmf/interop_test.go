@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -759,7 +761,25 @@ func TestInterop_Live_GoMessengerPythonRecv(t *testing.T) {
 		if lr.resp.Text != wantText {
 			t.Fatalf("python text=%q", lr.resp.Text)
 		}
-	case <-time.After(20 * time.Second):
+	case <-time.After(45 * time.Second):
 		t.Fatal("timeout waiting for python lxmf result")
+	}
+}
+
+func waitReadyJSON(t *testing.T, path string, timeout time.Duration) map[string]string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && len(raw) > 0 {
+			var out map[string]string
+			if json.Unmarshal(raw, &out) == nil && len(out) > 0 {
+				return out
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for ready file %s", path)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

@@ -372,16 +372,31 @@ def cmd_live_recv(req: dict[str, Any]) -> dict[str, Any]:
 
         got: dict[str, str] = {}
         ev = threading.Event()
+        last_err = ""
 
         def on_packet(data: bytes, packet: Any) -> None:
-            try:
-                msg = LXMessage.unpack_from_bytes(data)
-            except Exception:
+            nonlocal last_err
+            dest_hash = getattr(getattr(packet, "destination", None), "hash", None) or dest.hash
+            blobs = []
+            if dest_hash:
+                blobs.append(dest_hash + data)
+            blobs.append(data)
+            seen: set[bytes] = set()
+            for blob in blobs:
+                if blob in seen:
+                    continue
+                seen.add(blob)
+                try:
+                    msg = LXMessage.unpack_from_bytes(blob)
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+                if msg is None:
+                    last_err = "unpack_from_bytes returned None"
+                    continue
+                got["text"] = _as_text(msg.content)
+                ev.set()
                 return
-            if msg is None:
-                return
-            got["text"] = _as_text(msg.content)
-            ev.set()
 
         dest.set_packet_callback(on_packet)
         Path(ready_path).write_text(
@@ -401,7 +416,10 @@ def cmd_live_recv(req: dict[str, Any]) -> dict[str, Any]:
                 break
 
         if not ev.is_set():
-            return {"ok": False, "error": "timeout waiting for LXMF packet"}
+            err = "timeout waiting for LXMF packet"
+            if last_err:
+                err += f": last unpack error: {last_err}"
+            return {"ok": False, "error": err}
 
         return {
             "ok": True,

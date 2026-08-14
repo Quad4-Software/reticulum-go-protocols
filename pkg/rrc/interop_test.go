@@ -4,6 +4,8 @@ package rrc
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -532,5 +534,23 @@ func TestInterop_WrongVersionRejected(t *testing.T) {
 	}
 	if resp.OK {
 		t.Fatal("python accepted unsupported version")
+	}
+}
+
+func waitReadyJSON(t *testing.T, path string, timeout time.Duration) map[string]string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && len(raw) > 0 {
+			var out map[string]string
+			if json.Unmarshal(raw, &out) == nil && len(out) > 0 {
+				return out
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for ready file %s", path)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
