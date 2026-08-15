@@ -60,7 +60,11 @@ func (c *Codec) Encode(pcm []int16) ([]byte, error) {
 		c.encOut = make([]byte, need)
 	}
 	out := c.encOut[:need]
-	out[0] = (c.bitdepth << 6) | byte(c.channels-1)
+	ch := c.channels - 1
+	if ch < 0 || ch > 0x3f {
+		return nil, fmt.Errorf("invalid channels")
+	}
+	out[0] = (c.bitdepth << 6) | byte(ch)
 	off := 1
 	for _, s := range pcm {
 		f := float32(s) / 32768.0

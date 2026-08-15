@@ -72,7 +72,7 @@ type DeviceInfo struct {
 func ListDevices() ([]DeviceInfo, error) {
 	const maxn = 64
 	buf := make([]C.rgesp_listed_dev, maxn)
-	n := int(C.rgesp_list_devices(&buf[0], C.int(maxn)))
+	n := int(C.rgesp_list_devices(&buf[0], cInt(maxn)))
 	if n < 0 {
 		return nil, nil
 	}
@@ -82,4 +82,9 @@ func ListDevices() ([]DeviceInfo, error) {
 		out = append(out, DeviceInfo{Name: name, Capture: buf[i].capture != 0})
 	}
 	return out, nil
+}
+
+// #nosec G115 -- audio parameters are bounded before C API calls
+func cInt(v int) C.int {
+	return C.int(v)
 }

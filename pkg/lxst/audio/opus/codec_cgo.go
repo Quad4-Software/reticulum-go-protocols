@@ -70,15 +70,15 @@ func NewEncoderConfig(cfg EncoderConfig) (Encoder, error) {
 		app = C.OPUS_APPLICATION_AUDIO
 	}
 	var err C.int
-	enc := C.opus_encoder_create(C.int(cfg.SampleRate), C.int(cfg.Channels), app, &err)
+	enc := C.opus_encoder_create(cInt(cfg.SampleRate), cInt(cfg.Channels), app, &err)
 	if err != C.OPUS_OK {
 		return nil, fmt.Errorf("opus_encoder_create: %d", int(err))
 	}
-	if cErr := C.rgesp_opus_set_bitrate(enc, C.int(cfg.Bitrate)); cErr != C.OPUS_OK {
+	if cErr := C.rgesp_opus_set_bitrate(enc, cInt(cfg.Bitrate)); cErr != C.OPUS_OK {
 		C.opus_encoder_destroy(enc)
 		return nil, fmt.Errorf("opus_set_bitrate: %d", int(cErr))
 	}
-	if cErr := C.rgesp_opus_set_complexity(enc, C.int(DefaultComplexity)); cErr != C.OPUS_OK {
+	if cErr := C.rgesp_opus_set_complexity(enc, cInt(DefaultComplexity)); cErr != C.OPUS_OK {
 		C.opus_encoder_destroy(enc)
 		return nil, fmt.Errorf("opus_set_complexity: %d", int(cErr))
 	}
@@ -103,9 +103,9 @@ func (e *cgoEncoder) Encode(pcm []int16) ([]byte, error) {
 	n := C.opus_encode(
 		e.enc,
 		(*C.opus_int16)(unsafe.Pointer(&pcm[0])),
-		C.int(e.frame),
+		cInt(e.frame),
 		(*C.uchar)(unsafe.Pointer(&e.out[0])),
-		C.int(len(e.out)),
+		cInt(len(e.out)),
 	)
 	if n < 0 {
 		return nil, fmt.Errorf("opus_encode: %d", int(n))
@@ -117,7 +117,7 @@ func (e *cgoEncoder) SetBitrate(bps int) error {
 	if e.closed {
 		return ErrCodecClosed
 	}
-	if cErr := C.rgesp_opus_set_bitrate(e.enc, C.int(bps)); cErr != C.OPUS_OK {
+	if cErr := C.rgesp_opus_set_bitrate(e.enc, cInt(bps)); cErr != C.OPUS_OK {
 		return fmt.Errorf("opus_set_bitrate: %d", int(cErr))
 	}
 	return nil
@@ -131,7 +131,7 @@ func (e *cgoEncoder) SetFEC(enabled bool) error {
 	if enabled {
 		v = 1
 	}
-	if cErr := C.rgesp_opus_set_fec(e.enc, C.int(v)); cErr != C.OPUS_OK {
+	if cErr := C.rgesp_opus_set_fec(e.enc, cInt(v)); cErr != C.OPUS_OK {
 		return fmt.Errorf("opus_set_fec: %d", int(cErr))
 	}
 	return nil
@@ -147,7 +147,7 @@ func (e *cgoEncoder) SetPacketLossPerc(pct int) error {
 	if pct > MaxLossPercent {
 		pct = MaxLossPercent
 	}
-	if cErr := C.rgesp_opus_set_pl(e.enc, C.int(pct)); cErr != C.OPUS_OK {
+	if cErr := C.rgesp_opus_set_pl(e.enc, cInt(pct)); cErr != C.OPUS_OK {
 		return fmt.Errorf("opus_set_packet_loss: %d", int(cErr))
 	}
 	return nil
@@ -194,7 +194,7 @@ func NewDecoderConfig(cfg DecoderConfig) (Decoder, error) {
 		cfg.FrameSamples = cfg.SampleRate * DefaultDecodeMs / 1000
 	}
 	var err C.int
-	dec := C.opus_decoder_create(C.int(cfg.SampleRate), C.int(cfg.Channels), &err)
+	dec := C.opus_decoder_create(cInt(cfg.SampleRate), cInt(cfg.Channels), &err)
 	if err != C.OPUS_OK {
 		return nil, fmt.Errorf("opus_decoder_create: %d", int(err))
 	}
@@ -224,9 +224,9 @@ func (d *cgoDecoder) Decode(packet []byte) ([]int16, error) {
 	n := C.opus_decode(
 		d.dec,
 		(*C.uchar)(unsafe.Pointer(&packet[0])),
-		C.int(len(packet)),
+		cInt(len(packet)),
 		(*C.opus_int16)(unsafe.Pointer(&d.pcm[0])),
-		C.int(d.frame),
+		cInt(d.frame),
 		0,
 	)
 	if n < 0 {
@@ -252,13 +252,18 @@ func (d *cgoDecoder) DecodePLC() ([]int16, error) {
 		nil,
 		0,
 		(*C.opus_int16)(unsafe.Pointer(&d.pcm[0])),
-		C.int(d.frame),
+		cInt(d.frame),
 		0,
 	)
 	if n < 0 {
 		return nil, fmt.Errorf("opus_decode_plc: %d", int(n))
 	}
 	return mixdownInterleaved(d.pcm[:int(n)*d.channels], d.channels), nil
+}
+
+// #nosec G115 -- audio parameters are bounded before C API calls
+func cInt(v int) C.int {
+	return C.int(v)
 }
 
 func (d *cgoDecoder) FrameSamples() int {

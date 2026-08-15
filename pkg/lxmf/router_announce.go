@@ -99,7 +99,7 @@ func (h *propagationAnnounceHandler) ReceivedAnnounce(destHash []byte, identAny 
 	}
 
 	tr := h.router.transport
-	if cfg.Autopeer && enabled && tr != nil && tr.HopsTo(destHash) <= uint8(cfg.AutopeerMaxDepth) {
+	if cfg.Autopeer && enabled && tr != nil && int(tr.HopsTo(destHash)) <= cfg.AutopeerMaxDepth {
 		h.router.peer(destHash, timebase, float64(transferLimit), float64(syncLimit), int(stampCost), int(stampFlex), int(peeringCost), metadata)
 		return nil
 	}
@@ -209,7 +209,7 @@ func (r *Router) tryAutopeerFromIncomingSync(remotePropHash []byte) {
 	if !cfg.Autopeer || !enabled || r.transport == nil {
 		return
 	}
-	if r.transport.HopsTo(remotePropHash) > uint8(cfg.AutopeerMaxDepth) {
+	if int(r.transport.HopsTo(remotePropHash)) > cfg.AutopeerMaxDepth {
 		return
 	}
 	Verbose("autopeer from incoming sync", "peer", hex.EncodeToString(remotePropHash))

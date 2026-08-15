@@ -4,6 +4,7 @@ package proto
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -67,9 +68,14 @@ func PackFrameInto(dst []byte, codec byte, payload []byte) ([]byte, error) {
 		dst[off+1] = byte(n)
 		off += 2
 	} else {
+		if n < 0 || n > 0xffff {
+			return nil, ErrPacketTooLarge
+		}
+		var lenBuf [2]byte
+		binary.BigEndian.PutUint16(lenBuf[:], uint16(n)) // #nosec G115 -- n checked above
 		dst[off] = 0xc5
-		dst[off+1] = byte(n >> 8)
-		dst[off+2] = byte(n)
+		dst[off+1] = lenBuf[0]
+		dst[off+2] = lenBuf[1]
 		off += 3
 	}
 	dst[off] = codec

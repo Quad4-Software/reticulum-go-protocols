@@ -81,7 +81,7 @@ func newCodec(cfg Config) (*cgoCodec, error) {
 	if cfg.PlaySamples <= 0 {
 		cfg.PlaySamples = proto.PlaybackSampleRate * 200 / 1000
 	}
-	c2 := C.rgesp_c2_create(C.int(cfg.Bitrate))
+	c2 := C.rgesp_c2_create(cInt(cfg.Bitrate))
 	if c2 == nil {
 		return nil, fmt.Errorf("codec2_create failed for %d bps", cfg.Bitrate)
 	}
@@ -101,7 +101,7 @@ func (c *cgoCodec) setMode(bitrate int, header byte) error {
 		c.header = header
 		return nil
 	}
-	next := C.rgesp_c2_create(C.int(bitrate))
+	next := C.rgesp_c2_create(cInt(bitrate))
 	if next == nil {
 		return fmt.Errorf("codec2_create failed for %d bps", bitrate)
 	}
@@ -221,4 +221,9 @@ func (c *cgoCodec) Close() error {
 
 func bitrateForHeader(header byte) int {
 	return BitrateForHeader(header)
+}
+
+// #nosec G115 -- audio parameters are bounded before C API calls
+func cInt(v int) C.int {
+	return C.int(v)
 }

@@ -171,6 +171,9 @@ func signalByte(v any) (byte, bool) {
 	case byte:
 		return x, true
 	case int8:
+		if x < 0 {
+			return 0, false
+		}
 		return byte(x), true
 	case int:
 		if x < 0 || x > 255 {

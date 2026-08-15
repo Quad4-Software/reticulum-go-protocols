@@ -72,8 +72,14 @@ func checkPeerResponse(resp any, action string) error {
 		}
 		return fmt.Errorf("%s request rejected", action)
 	case int8:
+		if v < 0 {
+			return fmt.Errorf("%s request rejected", action)
+		}
 		return peerErrorFromCode(byte(v), action)
 	case int64:
+		if v < 0 || v > 255 {
+			return fmt.Errorf("%s request rejected", action)
+		}
 		return peerErrorFromCode(byte(v), action)
 	case uint8:
 		return peerErrorFromCode(v, action)

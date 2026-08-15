@@ -415,7 +415,7 @@ func rrc_client_event_poll(client C.uint64_t, timeoutMs C.int, event *C.rrc_even
 }
 
 func fillEvent(dst *C.rrc_event, ev librrc.Event) {
-	dst.kind = C.int(ev.Kind)
+	dst.kind = cInt(ev.Kind)
 	dst.msg_type = C.uint64_t(ev.MsgType)
 	dst.sender_len = 0
 	dst.peer_len = 0
@@ -597,6 +597,11 @@ func cCode(code int) C.int {
 	default:
 		return 6
 	}
+}
+
+// #nosec G115 -- RRC event fields fit the C ABI int type
+func cInt(v int) C.int {
+	return C.int(v)
 }
 
 var _ = sync.Mutex{}

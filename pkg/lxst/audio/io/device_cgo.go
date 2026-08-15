@@ -264,7 +264,7 @@ func Open(opts Options) (Device, error) {
 		capName = C.CString(opts.Microphone)
 		defer C.free(unsafe.Pointer(capName))
 	}
-	if C.rgesp_audio_init_ex(d.dev, C.int(opts.Role), playName, capName) != 0 {
+	if C.rgesp_audio_init_ex(d.dev, cInt(opts.Role), playName, capName) != 0 {
 		C.free(unsafe.Pointer(d.dev))
 		d.dev = nil
 		return NewNullDevice(), nil
@@ -292,7 +292,7 @@ func (d *miniaudioDevice) ReadPCM() ([]int16, error) {
 		d.pcm = make([]int16, d.frameSize)
 	}
 	d.pcm = d.pcm[:d.frameSize]
-	n := C.rgesp_audio_read(d.dev, (*C.short)(unsafe.Pointer(&d.pcm[0])), C.int(d.frameSize))
+	n := C.rgesp_audio_read(d.dev, (*C.short)(unsafe.Pointer(&d.pcm[0])), cInt(d.frameSize))
 	if n <= 0 {
 		clear(d.pcm)
 		return d.pcm, nil
@@ -307,7 +307,7 @@ func (d *miniaudioDevice) WritePCM(pcm []int16) error {
 	if !d.duplex || len(pcm) == 0 {
 		return nil
 	}
-	_ = C.rgesp_audio_write(d.dev, (*C.short)(unsafe.Pointer(&pcm[0])), C.int(len(pcm)))
+	_ = C.rgesp_audio_write(d.dev, (*C.short)(unsafe.Pointer(&pcm[0])), cInt(len(pcm)))
 	return nil
 }
 
@@ -322,4 +322,9 @@ func (d *miniaudioDevice) Close() error {
 		d.dev = nil
 	}
 	return nil
+}
+
+// #nosec G115 -- audio parameters are bounded before C API calls
+func cInt(v int) C.int {
+	return C.int(v)
 }

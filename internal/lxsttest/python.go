@@ -22,7 +22,7 @@ func Python(t *testing.T) string {
 		if c == "" {
 			continue
 		}
-		cmd := exec.Command(c, "-c", "from RNS.vendor import umsgpack; import LXST, RNS; from LXST._version import __version__; raise SystemExit(0 if __version__=='0.5.1' else 1)")
+		cmd := exec.Command(c, "-c", "from RNS.vendor import umsgpack; import LXST, RNS; from LXST._version import __version__; raise SystemExit(0 if __version__=='0.5.1' else 1)") // #nosec G204 G702 -- probes trusted interpreter candidates for test setup
 		if err := cmd.Run(); err == nil {
 			return c
 		}
