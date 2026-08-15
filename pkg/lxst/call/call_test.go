@@ -244,12 +244,17 @@ func TestFirstMediaSoonAfterActive(t *testing.T) {
 	time.Sleep(80 * time.Millisecond)
 
 	first := make(chan time.Time, 1)
-	var tActive time.Time
+	answeredAt := make(chan time.Time, 1)
 	caller := call.NewCall(tA, call.Config{
 		Identity: idA,
 		UseAudio: false,
 		Events: call.Events{
-			OnAnswered: func(*call.Call) { tActive = time.Now() },
+			OnAnswered: func(*call.Call) {
+				select {
+				case answeredAt <- time.Now():
+				default:
+				}
+			},
 			OnFrame: func(pcm []int16) {
 				if len(pcm) == 0 {
 					return
@@ -273,17 +278,24 @@ func TestFirstMediaSoonAfterActive(t *testing.T) {
 	if err := caller.Dial(ctx, idB); err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	select {
-	case tf := <-first:
-		if tActive.IsZero() {
-			t.Fatal("answered timestamp missing")
+	var tf, tActive time.Time
+	gotFrame, gotAnswered := false, false
+	for !gotFrame || !gotAnswered {
+		select {
+		case tf = <-first:
+			gotFrame = true
+		case tActive = <-answeredAt:
+			gotAnswered = true
+		case <-ctx.Done():
+			if !gotAnswered {
+				t.Fatal("answered timestamp missing")
+			}
+			t.Fatal("no first frame")
 		}
-		dt := tf.Sub(tActive)
-		if dt > 40*time.Millisecond {
-			t.Fatalf("first frame %s after active, want under 40ms", dt)
-		}
-	case <-ctx.Done():
-		t.Fatal("no first frame")
+	}
+	dt := tf.Sub(tActive)
+	if dt > 40*time.Millisecond {
+		t.Fatalf("first frame %s after active, want under 40ms", dt)
 	}
 	_ = caller.Hangup("done")
 }
@@ -631,7 +643,7 @@ func TestCalleeFirstFrameSoonAfterEstablished(t *testing.T) {
 	destB.AcceptsLinks(true)
 	ringing := make(chan *call.Call, 1)
 	first := make(chan time.Time, 1)
-	var tEst time.Time
+	establishedAt := make(chan time.Time, 1)
 	sb := call.NewSwitchboard(tB, call.Config{
 		Identity: idB,
 		UseAudio: false,
@@ -659,27 +671,37 @@ func TestCalleeFirstFrameSoonAfterEstablished(t *testing.T) {
 		select {
 		case c := <-ringing:
 			_ = c.Answer(ctx)
-			tEst = time.Now()
+			select {
+			case establishedAt <- time.Now():
+			default:
+			}
 		case <-ctx.Done():
 		}
 	}()
 	if err := caller.Dial(ctx, idB); err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	select {
-	case tf := <-first:
-		if tEst.IsZero() {
-			t.Fatal("answer timestamp missing")
+	var tf, tEst time.Time
+	gotFrame, gotEst := false, false
+	for !gotFrame || !gotEst {
+		select {
+		case tf = <-first:
+			gotFrame = true
+		case tEst = <-establishedAt:
+			gotEst = true
+		case <-ctx.Done():
+			if !gotEst {
+				t.Fatal("answer timestamp missing")
+			}
+			t.Fatal("no callee first frame")
 		}
-		dt := tf.Sub(tEst)
-		if dt > 40*time.Millisecond {
-			t.Fatalf("callee first frame %s after established, want under 40ms", dt)
-		}
-		if dt >= 10*time.Millisecond {
-			t.Fatalf("callee first frame %s waited on receive ticker", dt)
-		}
-	case <-ctx.Done():
-		t.Fatal("no callee first frame")
+	}
+	dt := tf.Sub(tEst)
+	if dt > 40*time.Millisecond {
+		t.Fatalf("callee first frame %s after established, want under 40ms", dt)
+	}
+	if dt >= 10*time.Millisecond {
+		t.Fatalf("callee first frame %s waited on receive ticker", dt)
 	}
 	_ = caller.Hangup("done")
 }
