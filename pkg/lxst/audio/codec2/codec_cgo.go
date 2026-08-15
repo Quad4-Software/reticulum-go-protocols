@@ -45,6 +45,9 @@ import (
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
 )
 
+// Native reports whether this build talks to libcodec2.
+func Native() bool { return true }
+
 type cgoCodec struct {
 	c2      *C.struct_CODEC2
 	bitrate int

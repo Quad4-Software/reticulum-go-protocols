@@ -136,3 +136,7 @@ func TestEncoderFEC(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNativeReportsBuild(t *testing.T) {
+	_ = opus.Native()
+}

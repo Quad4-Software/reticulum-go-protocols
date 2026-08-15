@@ -89,7 +89,7 @@ func (c *Call) onIdentified(_ *link.Link, id *identity.Identity) {
 		c.end("rate limited")
 		return
 	}
-	if !c.state.CompareAndSwap(int32(StateConnecting), int32(StateRinging)) {
+	if !c.casState(StateConnecting, StateRinging) {
 		return
 	}
 	c.status.Store(int32(proto.StatusRinging))
@@ -188,7 +188,7 @@ func (c *Call) signalRejected() {
 
 func (c *Call) signalRinging() {
 	c.status.Store(int32(proto.StatusRinging))
-	if c.state.CompareAndSwap(int32(StateConnecting), int32(StateRinging)) || c.state.Load() == int32(StateRinging) {
+	if c.casState(StateConnecting, StateRinging) || c.state.Load() == int32(StateRinging) {
 		c.applyProfile(int(c.profile.Load()))
 		_ = c.sendSignals(
 			proto.SignalPreferredProfile(int(c.profile.Load())),
@@ -213,13 +213,14 @@ func (c *Call) signalConnecting() {
 func (c *Call) signalEstablished() {
 	if !c.incoming.Load() {
 		_ = c.openPipelines()
-		_ = c.startPipelines()
-		if c.state.CompareAndSwap(int32(StateRinging), int32(StateActive)) ||
-			c.state.CompareAndSwap(int32(StateConnecting), int32(StateActive)) {
+		became := c.casState(StateRinging, StateActive) || c.casState(StateConnecting, StateActive)
+		if became {
 			c.status.Store(int32(proto.StatusEstablished))
-			if c.events.OnAnswered != nil {
-				c.events.OnAnswered(c)
-			}
+		}
+		c.armTX()
+		_ = c.startPipelines()
+		if became && c.events.OnAnswered != nil {
+			c.events.OnAnswered(c)
 		}
 		return
 	}
@@ -266,9 +267,9 @@ func (c *Call) handleFrame(frame []byte) {
 		return
 	}
 	seq := uint16(c.frameSeq.Add(1)) // #nosec G115 -- 16-bit media sequence wraps
-	ms := max(time.Now().UnixMilli(), 0)
-	c.jitter.Push(seq, uint32(ms), frame) // #nosec G115 -- jitter timestamps are 32-bit and wrap
+	c.jitter.Push(seq, 0, frame)
 	c.recvCount.Add(1)
+	c.wakeRecv()
 }
 
 func (c *Call) sendSignals(signals ...int) error {

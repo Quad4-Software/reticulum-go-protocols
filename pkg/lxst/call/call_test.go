@@ -201,6 +201,93 @@ func TestGoGoCallOverPairedInterface(t *testing.T) {
 	t.Fatal("no pcm captured")
 }
 
+func TestFirstMediaSoonAfterActive(t *testing.T) {
+	tA := transport.NewTransport(isolatedConfig(t))
+	tB := transport.NewTransport(isolatedConfig(t))
+	if err := tA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ifA := newPairIface("a")
+	ifB := newPairIface("b")
+	ifA.peer = ifB
+	ifB.peer = ifA
+	if err := tA.RegisterInterface("a", ifA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.RegisterInterface("b", ifB); err != nil {
+		t.Fatal(err)
+	}
+	idA, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB, err := destination.New(idB, destination.In, destination.Single, proto.AppName, tB, proto.AspectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB.AcceptsLinks(true)
+	ringing := make(chan *call.Call, 1)
+	sb := call.NewSwitchboard(tB, call.Config{
+		Identity: idB,
+		UseAudio: false,
+		Events:   call.Events{OnRinging: func(c *call.Call) { ringing <- c }},
+	}, nil)
+	sb.Bind(destB)
+	_ = destB.Announce(false, nil, nil)
+	time.Sleep(80 * time.Millisecond)
+
+	first := make(chan time.Time, 1)
+	var tActive time.Time
+	caller := call.NewCall(tA, call.Config{
+		Identity: idA,
+		UseAudio: false,
+		Events: call.Events{
+			OnAnswered: func(*call.Call) { tActive = time.Now() },
+			OnFrame: func(pcm []int16) {
+				if len(pcm) == 0 {
+					return
+				}
+				select {
+				case first <- time.Now():
+				default:
+				}
+			},
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() {
+		select {
+		case c := <-ringing:
+			_ = c.Answer(ctx)
+		case <-ctx.Done():
+		}
+	}()
+	if err := caller.Dial(ctx, idB); err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	select {
+	case tf := <-first:
+		if tActive.IsZero() {
+			t.Fatal("answered timestamp missing")
+		}
+		dt := tf.Sub(tActive)
+		if dt > 40*time.Millisecond {
+			t.Fatalf("first frame %s after active, want under 40ms", dt)
+		}
+	case <-ctx.Done():
+		t.Fatal("no first frame")
+	}
+	_ = caller.Hangup("done")
+}
+
 func TestGoGoHalfDuplexCall(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live mesh half duplex call test")
@@ -427,4 +514,172 @@ func TestRejectIncoming(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected rejected callback")
 	}
+}
+
+func TestSequentialCallsAfterHangup(t *testing.T) {
+	tA := transport.NewTransport(isolatedConfig(t))
+	tB := transport.NewTransport(isolatedConfig(t))
+	if err := tA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ifA := newPairIface("a")
+	ifB := newPairIface("b")
+	ifA.peer = ifB
+	ifB.peer = ifA
+	if err := tA.RegisterInterface("a", ifA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.RegisterInterface("b", ifB); err != nil {
+		t.Fatal(err)
+	}
+	idA, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB, err := destination.New(idB, destination.In, destination.Single, proto.AppName, tB, proto.AspectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB.AcceptsLinks(true)
+	ringing := make(chan *call.Call, 2)
+	sb := call.NewSwitchboard(tB, call.Config{
+		Identity: idB,
+		UseAudio: false,
+		Events:   call.Events{OnRinging: func(c *call.Call) { ringing <- c }},
+	}, nil)
+	sb.Bind(destB)
+	_ = destB.Announce(false, nil, nil)
+	time.Sleep(80 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	go func() {
+		for {
+			select {
+			case c := <-ringing:
+				_ = c.Answer(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	caller := call.NewCall(tA, call.Config{Identity: idA, UseAudio: false})
+	if err := caller.Dial(ctx, idB); err != nil {
+		t.Fatalf("first dial: %v", err)
+	}
+	occupied := sb.Active()
+	_ = caller.Hangup("done")
+	if occupied != nil {
+		_ = occupied.Hangup("done")
+	}
+	if sb.Active() != nil {
+		t.Fatal("switchboard still occupied after hangup")
+	}
+
+	second := call.NewCall(tA, call.Config{Identity: idA, UseAudio: false})
+	if err := second.Dial(ctx, idB); err != nil {
+		t.Fatalf("second dial: %v", err)
+	}
+	if second.State() != call.StateActive {
+		t.Fatalf("second call state %v", second.State())
+	}
+	_ = second.Hangup("done")
+	if cur := sb.Active(); cur != nil {
+		_ = cur.Hangup("done")
+	}
+}
+
+func TestCalleeFirstFrameSoonAfterEstablished(t *testing.T) {
+	tA := transport.NewTransport(isolatedConfig(t))
+	tB := transport.NewTransport(isolatedConfig(t))
+	if err := tA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ifA := newPairIface("a")
+	ifB := newPairIface("b")
+	ifA.peer = ifB
+	ifB.peer = ifA
+	if err := tA.RegisterInterface("a", ifA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.RegisterInterface("b", ifB); err != nil {
+		t.Fatal(err)
+	}
+	idA, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB, err := destination.New(idB, destination.In, destination.Single, proto.AppName, tB, proto.AspectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB.AcceptsLinks(true)
+	ringing := make(chan *call.Call, 1)
+	first := make(chan time.Time, 1)
+	var tEst time.Time
+	sb := call.NewSwitchboard(tB, call.Config{
+		Identity: idB,
+		UseAudio: false,
+		Events: call.Events{
+			OnRinging: func(c *call.Call) { ringing <- c },
+			OnFrame: func(pcm []int16) {
+				if len(pcm) == 0 {
+					return
+				}
+				select {
+				case first <- time.Now():
+				default:
+				}
+			},
+		},
+	}, nil)
+	sb.Bind(destB)
+	_ = destB.Announce(false, nil, nil)
+	time.Sleep(80 * time.Millisecond)
+
+	caller := call.NewCall(tA, call.Config{Identity: idA, UseAudio: false})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() {
+		select {
+		case c := <-ringing:
+			_ = c.Answer(ctx)
+			tEst = time.Now()
+		case <-ctx.Done():
+		}
+	}()
+	if err := caller.Dial(ctx, idB); err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	select {
+	case tf := <-first:
+		if tEst.IsZero() {
+			t.Fatal("answer timestamp missing")
+		}
+		dt := tf.Sub(tEst)
+		if dt > 40*time.Millisecond {
+			t.Fatalf("callee first frame %s after established, want under 40ms", dt)
+		}
+		if dt >= 10*time.Millisecond {
+			t.Fatalf("callee first frame %s waited on receive ticker", dt)
+		}
+	case <-ctx.Done():
+		t.Fatal("no callee first frame")
+	}
+	_ = caller.Hangup("done")
 }

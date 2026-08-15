@@ -16,6 +16,7 @@ from LXST import APP_NAME
 
 
 def emit(obj):
+    obj["t_ns"] = time.perf_counter_ns()
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
 
@@ -145,6 +146,7 @@ class HeadlessPhone(SignallingReceiver):
         self.incoming = False
         self.answered = False
         self.status = Signalling.STATUS_CALLING
+        emit({"event": "dial_start"})
         self.active = RNS.Link(
             dest,
             established_callback=self._outgoing_up,

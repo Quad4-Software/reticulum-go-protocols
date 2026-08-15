@@ -132,6 +132,10 @@ type Call struct {
 	params    proto.CodecParams
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
+	stateWait chan struct{}
+	recvWake  chan struct{}
+	txArm     chan struct{}
+	txArmed   atomic.Bool
 	opened    bool
 	started   bool
 	recvKind  byte
@@ -156,6 +160,9 @@ func NewCall(t *transport.Transport, cfg Config) *Call {
 		events:    cfg.Events,
 		jitter:    media.NewJitterBuffer(defaultJitterTargetMs, defaultJitterMaxFrames),
 		ringStop:  make(chan struct{}),
+		stateWait: make(chan struct{}, 1),
+		recvWake:  make(chan struct{}, 1),
+		txArm:     make(chan struct{}, 1),
 		adaptive:  media.NewAdaptiveController(),
 		bandpass:  filter.NewBandPass(speechLowHz, speechHighHz, io.DefaultSampleRate),
 		agc:       filter.NewAGC(defaultAGCdB),
@@ -238,6 +245,9 @@ func (c *Call) SetRateCheck(l *RateLimiter) {
 	c.limiter = l
 }
 
+// Dial places an outgoing call and blocks until the call is Active or the
+// wait fails. OnAnswered may still be running when Dial returns. Time first
+// media from OnAnswered or OnFrame, not from Dial returning.
 func (c *Call) Dial(ctx context.Context, remote *identity.Identity) error {
 	if remote == nil {
 		return ErrRemoteRequired
@@ -245,7 +255,7 @@ func (c *Call) Dial(ctx context.Context, remote *identity.Identity) error {
 	if c.cfg.Identity == nil {
 		return ErrNoIdentity
 	}
-	if !c.state.CompareAndSwap(int32(StateIdle), int32(StateConnecting)) {
+	if !c.casState(StateIdle, StateConnecting) {
 		return ErrAlreadyCall
 	}
 	c.incoming.Store(false)
@@ -253,7 +263,7 @@ func (c *Call) Dial(ctx context.Context, remote *identity.Identity) error {
 
 	outDest, err := destination.New(remote, destination.Out, destination.Single, c.cfg.AppName, c.transport, c.cfg.AspectName)
 	if err != nil {
-		c.state.Store(int32(StateIdle))
+		c.storeState(StateIdle)
 		return err
 	}
 
@@ -263,7 +273,7 @@ func (c *Call) Dial(ctx context.Context, remote *identity.Identity) error {
 	l.SetPacketCallback(c.onPacket)
 	c.setLink(l)
 	if err := l.Establish(); err != nil {
-		c.state.Store(int32(StateIdle))
+		c.storeState(StateIdle)
 		c.setLink(nil)
 		return err
 	}
@@ -275,7 +285,7 @@ func (c *Call) Dial(ctx context.Context, remote *identity.Identity) error {
 }
 
 func (c *Call) ServeIncoming(l *link.Link) error {
-	if !c.state.CompareAndSwap(int32(StateIdle), int32(StateConnecting)) {
+	if !c.casState(StateIdle, StateConnecting) {
 		return ErrAlreadyCall
 	}
 	c.incoming.Store(true)
@@ -285,7 +295,7 @@ func (c *Call) ServeIncoming(l *link.Link) error {
 	l.SetLinkClosedCallback(c.onLinkClosed)
 	c.status.Store(int32(proto.StatusAvailable))
 	if err := c.sendSignals(proto.StatusAvailable); err != nil {
-		c.state.Store(int32(StateIdle))
+		c.storeState(StateIdle)
 		c.setLink(nil)
 		return err
 	}
@@ -311,10 +321,7 @@ func (c *Call) Answer(_ context.Context) error {
 	if err := c.openPipelines(); err != nil {
 		return err
 	}
-	if err := c.sendSignals(proto.StatusEstablished); err != nil {
-		return err
-	}
-	if !c.state.CompareAndSwap(int32(StateRinging), int32(StateActive)) {
+	if !c.casState(StateRinging, StateActive) {
 		c.end("answer raced hangup")
 		return ErrAnswerRaced
 	}
@@ -323,6 +330,11 @@ func (c *Call) Answer(_ context.Context) error {
 		c.end("pipeline start failed")
 		return err
 	}
+	if err := c.sendSignals(proto.StatusEstablished); err != nil {
+		c.end("establish failed")
+		return err
+	}
+	c.armTX()
 	if c.events.OnAnswered != nil {
 		c.events.OnAnswered(c)
 	}
@@ -509,8 +521,53 @@ func (c *Call) waitForState(ctx context.Context, want State, timeout time.Durati
 			return ctx.Err()
 		case <-deadline.C:
 			return ErrStateTimeout
+		case <-c.stateWait:
 		case <-tick.C:
 		}
+	}
+}
+
+func (c *Call) casState(from, to State) bool {
+	if !c.state.CompareAndSwap(int32(from), int32(to)) {
+		return false
+	}
+	c.kickWaiters()
+	return true
+}
+
+func (c *Call) storeState(s State) {
+	c.state.Store(int32(s))
+	c.kickWaiters()
+}
+
+func (c *Call) kickWaiters() {
+	if c.stateWait == nil {
+		return
+	}
+	select {
+	case c.stateWait <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Call) wakeRecv() {
+	if c.recvWake == nil {
+		return
+	}
+	select {
+	case c.recvWake <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Call) armTX() {
+	c.txArmed.Store(true)
+	if c.txArm == nil {
+		return
+	}
+	select {
+	case c.txArm <- struct{}{}:
+	default:
 	}
 }
 
@@ -529,13 +586,13 @@ func (c *Call) armTimeout(d time.Duration, stillWaiting func() bool, reason stri
 }
 
 func (c *Call) end(reason string) {
-	if !c.state.CompareAndSwap(int32(StateActive), int32(StateEnded)) &&
-		!c.state.CompareAndSwap(int32(StateRinging), int32(StateEnded)) &&
-		!c.state.CompareAndSwap(int32(StateConnecting), int32(StateEnded)) {
+	if !c.casState(StateActive, StateEnded) &&
+		!c.casState(StateRinging, StateEnded) &&
+		!c.casState(StateConnecting, StateEnded) {
 		if c.state.Load() == int32(StateEnded) {
 			return
 		}
-		c.state.Store(int32(StateEnded))
+		c.storeState(StateEnded)
 	}
 	c.status.Store(int32(proto.StatusAvailable))
 	c.stopRingtone()

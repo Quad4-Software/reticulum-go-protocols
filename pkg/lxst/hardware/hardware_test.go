@@ -9,21 +9,26 @@ import (
 
 func TestEnableKnownDrivers(t *testing.T) {
 	k := hardware.NewKeypad()
-	k.Enable("gpio_4x4")
-	if !k.Enabled {
-		t.Fatal("keypad")
+	if err := k.Enable("gpio_4x4"); err == nil {
+		t.Fatal("gpio keypad should report unimplemented")
 	}
-	k.Enable("unknown")
 	if k.Enabled {
+		t.Fatal("unimplemented keypad must stay disabled")
+	}
+	if err := k.Enable("unknown"); err == nil {
 		t.Fatal("unknown keypad")
 	}
-	d := hardware.NewLCD()
-	d.Enable("i2c_lcd1602")
-	if !d.Enabled {
-		t.Fatal("lcd")
+	if err := k.Enable(""); err != nil {
+		t.Fatal(err)
 	}
-	d.Enable("")
+	d := hardware.NewLCD()
+	if err := d.Enable("i2c_lcd1602"); err == nil {
+		t.Fatal("i2c display should report unimplemented")
+	}
 	if d.Enabled {
-		t.Fatal("empty lcd")
+		t.Fatal("unimplemented lcd must stay disabled")
+	}
+	if err := d.Enable(""); err != nil {
+		t.Fatal(err)
 	}
 }

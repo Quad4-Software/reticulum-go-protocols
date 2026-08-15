@@ -17,6 +17,8 @@ type LinkMetrics struct {
 	Q        float64
 	LossRate float64
 	JitterMs float64
+	Bitrate  int
+	UseFEC   bool
 }
 
 // AdaptiveController tunes bitrate, FEC, and jitter depth from link metrics.

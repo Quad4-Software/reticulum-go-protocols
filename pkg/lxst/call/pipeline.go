@@ -13,6 +13,7 @@ import (
 	"quad4/reticulum-go-protocols/pkg/lxst/audio/tone"
 	"quad4/reticulum-go-protocols/pkg/lxst/media"
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"quad4/reticulum-go/pkg/debug"
 )
 
 func (c *Call) openPipelines() error {
@@ -58,8 +59,21 @@ func (c *Call) openPipelines() error {
 			Speaker:    c.cfg.Speaker,
 			Microphone: c.cfg.Microphone,
 		})
-		if err != nil || dev == nil {
-			dev = io.NewNullDeviceSize(params.FrameSamples())
+		if err != nil {
+			_ = enc.Close()
+			_ = dec.Close()
+			c.mutex.Lock()
+			c.opened = false
+			c.mutex.Unlock()
+			return err
+		}
+		if dev == nil {
+			_ = enc.Close()
+			_ = dec.Close()
+			c.mutex.Lock()
+			c.opened = false
+			c.mutex.Unlock()
+			return io.ErrDeviceInit
 		}
 	} else {
 		dev = io.NewNullDeviceSize(params.FrameSamples())
@@ -143,6 +157,14 @@ func (c *Call) mediaSender(ctx context.Context) {
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	var bufs pcmScratch
+	if !c.txArmed.Load() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.txArm:
+		}
+	}
+	c.sendMediaTick(&bufs)
 	for {
 		select {
 		case <-ctx.Done():
@@ -162,7 +184,7 @@ type pcmScratch struct {
 }
 
 func (c *Call) sendMediaTick(bufs *pcmScratch) {
-	if c.state.Load() != int32(StateActive) {
+	if c.state.Load() != int32(StateActive) || !c.txArmed.Load() {
 		return
 	}
 	l := c.getLink()
@@ -289,6 +311,8 @@ func (c *Call) mediaReceiver(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-c.recvWake:
+			c.playReadyFrame(time.Now())
 		case now := <-ticker.C:
 			c.playReadyFrame(now)
 		}
@@ -372,6 +396,9 @@ func (c *Call) applyLinkStats() {
 	if encoder != nil && params.Codec == proto.CodecOpus {
 		c.applyOpusAdaptation(encoder, params, metrics)
 	}
+	metrics.JitterMs = float64(c.jitter.TargetMs())
+	metrics.Bitrate = c.adaptive.Bitrate()
+	metrics.UseFEC = c.adaptive.UseFEC()
 	if c.events.OnStats != nil {
 		c.events.OnStats(c, metrics)
 	}
@@ -542,9 +569,11 @@ func (c *Call) startBusyTone() {
 func (c *Call) openPlayDevice(name string) io.Device {
 	dev, err := io.Open(io.Options{Role: io.RolePlayback, Speaker: name})
 	if err != nil || dev == nil {
+		debug.Log(debug.DebugInfo, "lxst play device failed", "error", err)
 		return nil
 	}
 	if err := dev.Start(); err != nil {
+		debug.Log(debug.DebugInfo, "lxst play device start failed", "error", err)
 		_ = dev.Close()
 		return nil
 	}

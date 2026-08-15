@@ -253,7 +253,7 @@ func Open(opts Options) (Device, error) {
 	d := &miniaudioDevice{duplex: opts.Role != RoleCapture, frameSize: DefaultFrameSize}
 	d.dev = (*C.rgesp_audio)(C.calloc(1, C.sizeof_rgesp_audio))
 	if d.dev == nil {
-		return NewNullDevice(), nil
+		return nil, fmt.Errorf("%w: alloc", ErrDeviceInit)
 	}
 	var playName, capName *C.char
 	if opts.Speaker != "" {
@@ -267,7 +267,7 @@ func Open(opts Options) (Device, error) {
 	if C.rgesp_audio_init_ex(d.dev, cInt(opts.Role), playName, capName) != 0 {
 		C.free(unsafe.Pointer(d.dev))
 		d.dev = nil
-		return NewNullDevice(), nil
+		return nil, fmt.Errorf("%w: init", ErrDeviceInit)
 	}
 	return d, nil
 }

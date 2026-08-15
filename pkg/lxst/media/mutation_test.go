@@ -31,6 +31,26 @@ func TestMutationSkipMissingIsLoss(t *testing.T) {
 	}
 }
 
+func TestJitterTimestampAssignedAndUsed(t *testing.T) {
+	jb := media.NewJitterBuffer(40, 8)
+	now := time.Now()
+	jb.Push(1, 0, []byte{1})
+	jb.Push(3, 0, []byte{3})
+	f, ok := jb.PopReady(now)
+	if !ok || f.Sequence != 1 || f.Timestamp == 0 {
+		t.Fatalf("expected seq 1 with timestamp, got %+v ok=%v", f, ok)
+	}
+	_, ok = jb.PopReady(now.Add(5 * time.Millisecond))
+	if ok {
+		t.Fatal("seq 2 should wait")
+	}
+	_, _ = jb.PopReady(now.Add(50 * time.Millisecond))
+	f, ok = jb.PopReady(now.Add(55 * time.Millisecond))
+	if !ok || f.Sequence != 3 {
+		t.Fatalf("expected seq 3 after timestamp skip, got %+v ok=%v", f, ok)
+	}
+}
+
 func TestMutationAdaptiveFloorIsMinBitrate(t *testing.T) {
 	ac := media.NewAdaptiveController()
 	for range 40 {

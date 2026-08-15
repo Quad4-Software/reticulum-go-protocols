@@ -147,6 +147,13 @@ func (s *Switchboard) Occupy(c *Call) bool {
 	if s.busyLocked() {
 		return false
 	}
+	prev := c.events.OnEnded
+	c.events.OnEnded = func(ended *Call, reason string) {
+		s.Release(ended)
+		if prev != nil {
+			prev(ended, reason)
+		}
+	}
 	s.active = c
 	return true
 }

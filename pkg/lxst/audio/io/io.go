@@ -8,7 +8,10 @@ import (
 	"sync"
 )
 
-var ErrDeviceClosed = errors.New("audio device closed")
+var (
+	ErrDeviceClosed = errors.New("audio device closed")
+	ErrDeviceInit   = errors.New("audio device init failed")
+)
 
 const (
 	DefaultSampleRate = 48000

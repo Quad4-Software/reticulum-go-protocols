@@ -10,6 +10,9 @@ import (
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
 )
 
+// Native reports whether this build talks to libcodec2.
+func Native() bool { return false }
+
 type stubCodec struct {
 	header byte
 	frame  int

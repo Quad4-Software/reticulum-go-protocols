@@ -34,6 +34,9 @@ import (
 	"unsafe"
 )
 
+// Native reports whether this build talks to libopus.
+func Native() bool { return true }
+
 type cgoEncoder struct {
 	enc      *C.OpusEncoder
 	frame    int

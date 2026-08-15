@@ -27,6 +27,8 @@ type JitterBuffer struct {
 	nextSeq   uint16
 	started   bool
 	lastPop   time.Time
+	origin    time.Time
+	lastTS    uint32
 	lossCount uint64
 	recvCount uint64
 }
@@ -64,11 +66,19 @@ func (j *JitterBuffer) Push(seq uint16, timestamp uint32, payload []byte) {
 	if j.started && seqLess(seq, j.nextSeq) {
 		return
 	}
+	now := time.Now()
+	if j.origin.IsZero() {
+		j.origin = now
+	}
+	if timestamp == 0 {
+		ms := max(now.Sub(j.origin).Milliseconds(), 1)
+		timestamp = uint32(ms) // #nosec G115 -- relative ms fits uint32 for call lifetime
+	}
 	j.frames[seq] = Frame{
 		Sequence:  seq,
 		Timestamp: timestamp,
 		Payload:   append([]byte(nil), payload...),
-		Arrival:   time.Now(),
+		Arrival:   now,
 	}
 	if len(j.frames) > j.maxFrames {
 		j.dropOldestLocked()
@@ -98,6 +108,7 @@ func (j *JitterBuffer) PopReady(now time.Time) (Frame, bool) {
 	delete(j.frames, j.nextSeq)
 	j.nextSeq++
 	j.lastPop = now
+	j.lastTS = frame.Timestamp
 	return frame, true
 }
 
@@ -121,7 +132,24 @@ func (j *JitterBuffer) shouldSkipMissingLocked(now time.Time) bool {
 	if j.lastPop.IsZero() {
 		return len(j.frames) > 0
 	}
-	return now.Sub(j.lastPop) > wait
+	if now.Sub(j.lastPop) > wait {
+		return true
+	}
+	for seq, f := range j.frames {
+		if !seqLess(j.nextSeq, seq) {
+			continue
+		}
+		if now.Sub(f.Arrival) > wait {
+			return true
+		}
+		if j.lastTS != 0 && f.Timestamp > j.lastTS {
+			gap := f.Timestamp - j.lastTS
+			if gap > uint32(j.targetMs)/2 && now.Sub(f.Arrival) > wait/2 { // #nosec G115 -- targetMs is a small buffer depth in ms
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (j *JitterBuffer) dropOldestLocked() {

@@ -11,6 +11,7 @@ import (
 
 	"quad4/reticulum-go-protocols/internal/lxstcli"
 	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
+	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
 	"quad4/reticulum-go-protocols/pkg/lxst/call"
 	"quad4/reticulum-go-protocols/pkg/lxst/hardware"
 	"quad4/reticulum-go-protocols/pkg/lxst/history"
@@ -142,6 +143,10 @@ func main() {
 	cfg.Events = ui.events()
 	cfg.UseAudio = !*noAudio
 	cfg.DuplexIO = true
+	if cfg.UseAudio && !opus.Native() {
+		fmt.Fprintf(os.Stderr, "rnphone: native Opus is required for audio (build with CGO)\n")
+		os.Exit(1)
+	}
 	cfg.Profile = proto.ProfileFromName(*profile)
 	cfg.Mode = ui.callMode
 	cfg.RingTime = interactiveRingTime
@@ -172,8 +177,12 @@ func main() {
 	keypad := hardware.NewKeypad()
 	lcd := hardware.NewLCD()
 	if hw := ini.Raw["hardware"]; hw != nil {
-		keypad.Enable(hw["keypad"])
-		lcd.Enable(hw["display"])
+		if err := keypad.Enable(hw["keypad"]); err != nil {
+			fmt.Fprintf(os.Stderr, "hardware keypad: %v\n", err)
+		}
+		if err := lcd.Enable(hw["display"]); err != nil {
+			fmt.Fprintf(os.Stderr, "hardware display: %v\n", err)
+		}
 	}
 	_ = keypad
 	_ = lcd

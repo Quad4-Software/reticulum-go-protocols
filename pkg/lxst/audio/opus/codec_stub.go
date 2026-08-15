@@ -5,6 +5,9 @@ package opus
 
 import "fmt"
 
+// Native reports whether this build talks to libopus.
+func Native() bool { return false }
+
 type stubEncoder struct {
 	bitrate int
 	frame   int
