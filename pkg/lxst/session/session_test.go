@@ -345,6 +345,18 @@ func TestPushWithoutHost(t *testing.T) {
 	}
 }
 
+func TestPushPCMDropped(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	frame := []int16{1, 2, 3, 4}
+	var err error
+	for range 64 {
+		err = a.PushPCM(frame)
+	}
+	if !errors.Is(err, session.ErrPCMDropped) {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestRaceSessionPCM(t *testing.T) {
 	a, _, _ := pairedSessions(t)
 	var wg sync.WaitGroup

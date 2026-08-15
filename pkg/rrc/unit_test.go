@@ -164,3 +164,34 @@ func TestUnit_UnknownMessageTypesIgnoredConstants(t *testing.T) {
 		t.Fatal("type table size")
 	}
 }
+
+func TestParseHashGrouped(t *testing.T) {
+	raw := bytes.Repeat([]byte{0xab}, IdentityLength)
+	got, err := ParseHash(" <" + FormatHash(raw) + "> ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatalf("got %x", got)
+	}
+}
+
+func TestParseHashRejectsEmpty(t *testing.T) {
+	if _, err := ParseHash(" <> "); !errors.Is(err, ErrInvalidHash) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseWelcomeBodyRejectsNonMap(t *testing.T) {
+	_, err := ParseWelcomeBody("nope")
+	if !errors.Is(err, ErrInvalidEnvelope) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDialHashRejectsEmpty(t *testing.T) {
+	_, err := DialHash(nil, nil, "", ClientConfig{})
+	if !errors.Is(err, ErrInvalidHash) {
+		t.Fatalf("err = %v", err)
+	}
+}

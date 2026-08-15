@@ -144,6 +144,9 @@ func Open(cfg Config) (*Session, error) {
 		s.messenger.EnableRatchets(cfg.RatchetPath)
 	}
 	s.messenger.SetMessageHandler(s.onInbound)
+	s.messenger.SetReceiveError(func(err error) {
+		_ = s.fail(err)
+	})
 	rate := "on"
 	if cfg.NoRateLimit {
 		rate = "off"
@@ -351,7 +354,7 @@ func (s *Session) sendDest(ctx context.Context, dest []byte, title, content stri
 			err = s.messenger.SendDirect(msg)
 		}
 	} else if s.cfg.StampCost > 0 {
-		err = s.messenger.SendStamped(msg, s.cfg.StampCost)
+		err = s.messenger.SendStampedContext(ctx, msg, s.cfg.StampCost)
 	} else {
 		err = s.messenger.Send(msg)
 	}
@@ -428,27 +431,30 @@ func (s *Session) onInbound(msg *lxmf.LXMessage, _ common.NetworkInterface) {
 		if fn != nil {
 			fn(msg, err)
 		}
+		_ = s.fail(err)
 		s.emitState()
 		return
 	}
-	if s.cfg.DropUnverified && !msg.SignatureValidated {
-		s.mutex.Lock()
-		s.dropped++
-		fn := s.events.OnUnverified
-		s.mutex.Unlock()
+	if !msg.SignatureValidated {
 		s.note("unverified", "from", FormatHash(src))
-		if fn != nil {
-			fn(msg)
-		} else {
+		s.mutex.Lock()
+		unv := s.events.OnUnverified
+		s.mutex.Unlock()
+		if unv != nil {
+			unv(msg)
+		}
+		if s.cfg.DropUnverified {
 			s.mutex.Lock()
+			s.dropped++
 			dropFn := s.events.OnDropped
 			s.mutex.Unlock()
 			if dropFn != nil {
 				dropFn(msg, ErrUnverified)
 			}
+			_ = s.fail(ErrUnverified)
+			s.emitState()
+			return
 		}
-		s.emitState()
-		return
 	}
 	s.mutex.Lock()
 	s.recv++

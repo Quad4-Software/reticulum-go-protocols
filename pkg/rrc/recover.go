@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: 0BSD
 package rrc
 
-func recoverDiscard() {
-	_ = recover()
+import "log"
+
+func recoverLog() {
+	if r := recover(); r != nil {
+		log.Printf("rrc: recovered: %v", r)
+	}
 }

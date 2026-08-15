@@ -80,13 +80,11 @@ func (c *Call) onIdentified(_ *link.Link, id *identity.Identity) {
 		return
 	}
 	if !c.callerAllowed(id) {
-		_ = c.sendSignals(proto.StatusBusy)
-		c.end("blocked")
+		c.rejectIncoming(ErrBlocked)
 		return
 	}
 	if c.limiter != nil && id != nil && !c.limiter.Allow(id.Hash()) {
-		_ = c.sendSignals(proto.StatusBusy)
-		c.end("rate limited")
+		c.rejectIncoming(ErrRateLimited)
 		return
 	}
 	if !c.casState(StateConnecting, StateRinging) {
@@ -227,13 +225,28 @@ func (c *Call) signalEstablished() {
 	c.status.Store(int32(proto.StatusEstablished))
 }
 
+func (c *Call) rejectIncoming(err error) {
+	c.mutex.Lock()
+	c.endErr = err
+	c.mutex.Unlock()
+	if c.events.OnBusy != nil {
+		c.events.OnBusy(c)
+	}
+	_ = c.sendSignals(proto.StatusBusy)
+	c.end(err.Error())
+}
+
 func (c *Call) applyPreferredProfile(signal int) {
 	profile := proto.ProfileFromSignal(signal)
 	if profile == 0 {
 		profile = proto.DefaultProfile
 	}
+	if !proto.KnownProfile(profile) {
+		debug.Log(debug.DebugError, "lxst ignore unknown remote profile", profile)
+		return
+	}
 	if c.state.Load() == int32(StateActive) {
-		c.switchProfile(profile)
+		_ = c.switchProfile(profile)
 		return
 	}
 	c.applyProfile(profile)
@@ -301,21 +314,22 @@ func (c *Call) applyProfile(profile int) {
 	c.jitter.SetTargetMs(params.FrameMs * params.BufferN)
 }
 
-func (c *Call) switchProfile(profile int) {
-	c.applyProfile(profile)
+func (c *Call) switchProfile(profile int) error {
 	if c.state.Load() != int32(StateActive) {
-		return
+		c.applyProfile(profile)
+		return nil
 	}
 	params := proto.ProfileParams(profile)
 	enc, err := newProfileEncoder(params)
 	if err != nil {
-		return
+		return err
 	}
 	dec, err := newProfileDecoder(params)
 	if err != nil {
 		_ = enc.Close()
-		return
+		return err
 	}
+	c.applyProfile(profile)
 	c.mutex.Lock()
 	oldEnc := c.encoder
 	oldDec := c.decoder
@@ -329,4 +343,5 @@ func (c *Call) switchProfile(profile int) {
 	if oldDec != nil {
 		_ = oldDec.Close()
 	}
+	return nil
 }

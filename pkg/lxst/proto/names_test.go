@@ -59,4 +59,10 @@ func TestLookupRejectsUnknown(t *testing.T) {
 	if _, ok := proto.LookupMode("ptt"); !ok {
 		t.Fatal("ptt")
 	}
+	if proto.KnownProfile(proto.ProfileQualityMedium) != true {
+		t.Fatal("mq known")
+	}
+	if proto.KnownProfile(0x99) {
+		t.Fatal("unknown known")
+	}
 }

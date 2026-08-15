@@ -98,12 +98,17 @@ func run() error {
 	}
 	dest.AcceptsLinks(true)
 
+	profileID, ok := proto.LookupProfile(*profileName)
+	if !ok {
+		return fmt.Errorf("unknown profile %q", *profileName)
+	}
+
 	cfg := call.Config{
 		Identity:   id,
 		Events:     dialEvents(),
 		UseAudio:   !*noAudio,
 		DuplexIO:   true,
-		Profile:    proto.ProfileFromName(*profileName),
+		Profile:    profileID,
 		Mode:       proto.DefaultMode,
 		AutoAnswer: *autoAnswer,
 	}

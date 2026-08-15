@@ -31,7 +31,7 @@ type HubConfig struct {
 	// OnInboundBytes is called for each inbound packet size in bytes.
 	OnInboundBytes func(n int)
 	// OnBadPacket is called when an inbound packet fails to decode.
-	OnBadPacket func()
+	OnBadPacket func(error)
 	// OnRateLimited is called when a peer exceeds RateLimitMsgsPerMinute.
 	OnRateLimited func()
 }
@@ -219,7 +219,7 @@ func (h *Hub) acceptLink(lnk *link.Link) {
 	}
 
 	p.sess = newSession(lnk, h.sender, false, func(env *Envelope) {
-		defer recoverDiscard()
+		defer recoverLog()
 		if remote := lnk.GetRemoteIdentity(); remote != nil {
 			register(remote.Hash())
 		}
@@ -245,9 +245,9 @@ func (h *Hub) acceptLink(lnk *link.Link) {
 			h.cfg.OnInboundBytes(n)
 		}
 	}
-	p.sess.onBad = func() {
+	p.sess.onBad = func(err error) {
 		if h.cfg.OnBadPacket != nil {
-			h.cfg.OnBadPacket()
+			h.cfg.OnBadPacket(err)
 		}
 		_ = h.replyError(p, "bad message")
 	}
@@ -334,7 +334,7 @@ func (h *Hub) applyInboundNick(p *hubPeer, nick string) error {
 }
 
 func (h *Hub) handlePeer(p *hubPeer, env *Envelope) {
-	defer recoverDiscard()
+	defer recoverLog()
 	if !h.takeToken(p) {
 		if h.cfg.OnRateLimited != nil {
 			h.cfg.OnRateLimited()

@@ -47,6 +47,7 @@ type Client struct {
 	pending  map[string]struct{}
 	welcome  *WelcomeBody
 	handlers ClientHandlers
+	lastErr  error
 }
 
 // Dial establishes a Link to hubHash, sends HELLO, and waits for WELCOME.
@@ -81,14 +82,17 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 	pathDeadline := time.Now().Add(cfg.DialTimeout)
 	for !tr.HasPath(hubHash) {
 		if time.Now().After(pathDeadline) {
-			return nil, ErrDialTimeout
+			return nil, fmt.Errorf("%w: no path", ErrDialTimeout)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
 	remote, err := identity.Recall(hubHash)
 	if err != nil || remote == nil {
-		return nil, fmt.Errorf("hub identity: %w", ErrDialTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("%w: recall: %v", ErrDialTimeout, err)
+		}
+		return nil, fmt.Errorf("%w: recall", ErrDialTimeout)
 	}
 	destOut, err := destination.FromHash(hubHash, remote, destination.Single, tr)
 	if err != nil {
@@ -122,7 +126,7 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 	for !lnk.IsActive() {
 		if time.Now().After(deadline) {
 			lnk.Teardown()
-			return nil, ErrDialTimeout
+			return nil, fmt.Errorf("%w: link", ErrDialTimeout)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -144,7 +148,8 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 	case env := <-welcomeCh:
 		body, err := ParseWelcomeBody(env.Body)
 		if err != nil {
-			body = &WelcomeBody{}
+			lnk.Teardown()
+			return nil, err
 		}
 		c.mu.Lock()
 		c.welcome = body
@@ -161,6 +166,14 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 		return nil, ErrSessionClosed
 	}
 	return c, nil
+}
+
+func DialHash(tr *transport.Transport, id *identity.Identity, hubHex string, cfg ClientConfig) (*Client, error) {
+	hubHash, err := ParseHash(hubHex)
+	if err != nil {
+		return nil, err
+	}
+	return Dial(tr, id, hubHash, cfg)
 }
 
 func (c *Client) sendHello() error {
@@ -233,6 +246,7 @@ func (c *Client) dispatch(env *Envelope, welcomeCh chan<- *Envelope) {
 			h(env)
 		}
 	case TypeError:
+		c.setErr(fmt.Errorf("%w: %s", ErrHub, FormatError(env)))
 		if h := c.handlers.OnError; h != nil {
 			h(env)
 		}
@@ -268,6 +282,21 @@ func (c *Client) State() ClientState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.state
+}
+
+func (c *Client) LastError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastErr
+}
+
+func (c *Client) setErr(err error) {
+	if err == nil {
+		return
+	}
+	c.mu.Lock()
+	c.lastErr = err
+	c.mu.Unlock()
 }
 
 // Welcome returns the WELCOME body if received.

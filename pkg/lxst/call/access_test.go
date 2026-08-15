@@ -3,6 +3,7 @@ package call_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -101,6 +102,68 @@ func TestAllowNoneBusy(t *testing.T) {
 		if caller.State() != call.StateEnded {
 			t.Fatalf("expected busy, state %v", caller.State())
 		}
+	}
+}
+
+func TestAllowNoneEndError(t *testing.T) {
+	tA := transport.NewTransport(isolatedConfig(t))
+	tB := transport.NewTransport(isolatedConfig(t))
+	if err := tA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ifA := newPairIface("a")
+	ifB := newPairIface("b")
+	ifA.peer = ifB
+	ifB.peer = ifA
+	if err := tA.RegisterInterface("a", ifA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.RegisterInterface("b", ifB); err != nil {
+		t.Fatal(err)
+	}
+	idA, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destB, err := destination.New(idB, destination.In, destination.Single, proto.AppName, tB, proto.AspectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+	sb := call.NewSwitchboard(tB, call.Config{
+		Identity:    idB,
+		UseAudio:    false,
+		AllowPolicy: phonebook.AllowNone,
+		Events: call.Events{
+			OnEnded: func(c *call.Call, _ string) {
+				select {
+				case got <- c.EndError():
+				default:
+				}
+			},
+		},
+	}, nil)
+	sb.Bind(destB)
+	_ = destB.Announce(false, nil, nil)
+	time.Sleep(100 * time.Millisecond)
+	caller := call.NewCall(tA, call.Config{Identity: idA, UseAudio: false})
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_ = caller.Dial(ctx, idB)
+	select {
+	case err := <-got:
+		if !errors.Is(err, call.ErrBlocked) {
+			t.Fatalf("got %v", err)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("no end error")
 	}
 }
 

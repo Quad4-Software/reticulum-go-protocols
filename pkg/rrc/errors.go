@@ -23,4 +23,6 @@ var (
 	ErrDialTimeout      = errors.New("rrc: dial timeout")
 	ErrWelcomeTimeout   = errors.New("rrc: welcome timeout")
 	ErrResourceDisabled = errors.New("rrc: resource transfer disabled")
+	ErrInvalidHash      = errors.New("rrc: invalid destination hash")
+	ErrHub              = errors.New("rrc: hub error")
 )

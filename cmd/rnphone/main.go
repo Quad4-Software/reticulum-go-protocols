@@ -129,6 +129,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	modeName := *callMode
+	modeID, ok := proto.LookupMode(modeName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown call mode %q\n", modeName)
+		os.Exit(1)
+	}
+	profileID, ok := proto.LookupProfile(*profile)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown profile %q\n", *profile)
+		os.Exit(1)
+	}
+
 	ui := &session{
 		book:     book,
 		log:      history.New(filepath.Join(dir, "storage", "calls.jsonl")),
@@ -136,7 +148,7 @@ func main() {
 		dest:     dest,
 		trans:    rns.Transport,
 		wait:     interactiveWaitTime,
-		callMode: proto.ModeFromName(*callMode),
+		callMode: modeID,
 	}
 	cfg := call.DefaultConfig()
 	cfg.Identity = id
@@ -147,7 +159,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "rnphone: native Opus is required for audio (build with CGO)\n")
 		os.Exit(1)
 	}
-	cfg.Profile = proto.ProfileFromName(*profile)
+	cfg.Profile = profileID
 	cfg.Mode = ui.callMode
 	cfg.RingTime = interactiveRingTime
 	cfg.WaitTime = interactiveWaitTime

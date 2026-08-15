@@ -1059,7 +1059,10 @@ func TestAdversarial_BadPacketRejected(t *testing.T) {
 	badCount := 0
 	m := newTestMesh(t, 43022, HubConfig{
 		Limits: HubLimits{RateLimitMsgsPerMinute: 60},
-		OnBadPacket: func() {
+		OnBadPacket: func(err error) {
+			if err == nil {
+				t.Error("nil bad packet error")
+			}
 			badCount++
 		},
 	})

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"testing"
+	"time"
 
 	"quad4/reticulum-go/pkg/common"
 	"quad4/reticulum-go/pkg/destination"
@@ -230,5 +231,62 @@ func TestMessenger_SendMessage(t *testing.T) {
 	err := m.SendMessage(peerHash, "Hello!")
 	if err != nil && !errors.Is(err, common.ErrNoPathToDestination) {
 		t.Errorf("SendMessage failed with unexpected error: %v", err)
+	}
+}
+
+func TestParseHashGrouped(t *testing.T) {
+	raw, err := hex.DecodeString(testHashHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseHash(" <" + FormatHash(raw) + "> ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatalf("got %x", got)
+	}
+	if _, err := ParseHash(" <> "); !errors.Is(err, ErrInvalidHash) {
+		t.Fatalf("empty err %v", err)
+	}
+}
+
+func TestNewMessageFromHexGrouped(t *testing.T) {
+	raw, err := hex.DecodeString(testHashHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := NewMessageFromHex(FormatHash(raw), testMessageText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.FormatSenderHash() != testHashHex {
+		t.Fatalf("got %s", msg.FormatSenderHash())
+	}
+}
+
+func TestSendHashRecallTimeout(t *testing.T) {
+	cfg := common.DefaultConfig()
+	cfg.ShareInstance = false
+	cfg.InMemoryPathTable = true
+	cfg.InMemoryKnownDestinations = true
+	cfg.ConfigPath = t.TempDir() + "/config"
+	tr := transport.NewTransport(cfg)
+	if err := tr.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+	id, err := identity.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest, err := destination.New(id, destination.In, destination.Single, "mf", tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewMessenger(tr, dest)
+	err = m.sendHash(FormatHash(bytes.Repeat([]byte{0xff}, SenderHashLength)), "hi", 50*time.Millisecond)
+	if !errors.Is(err, ErrRecall) {
+		t.Fatalf("err = %v", err)
 	}
 }

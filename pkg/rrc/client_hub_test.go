@@ -2,6 +2,7 @@
 package rrc
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -82,5 +83,20 @@ func TestHubRateLimit(t *testing.T) {
 	}
 	if h.allowRate(p) {
 		t.Fatal("third should fail")
+	}
+}
+
+func TestClientLastErrorFromHub(t *testing.T) {
+	sender := make([]byte, IdentityLength)
+	env, err := NewEnvelope(TypeError, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.Body = "denied"
+	env.HasBody = true
+	c := &Client{state: ClientActive, rooms: make(map[string]struct{})}
+	c.dispatch(env, nil)
+	if !errors.Is(c.LastError(), ErrHub) {
+		t.Fatalf("last error %v", c.LastError())
 	}
 }

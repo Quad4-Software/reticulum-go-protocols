@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"quad4/reticulum-go/pkg/destination"
 	"quad4/reticulum-go/pkg/identity"
@@ -57,9 +58,9 @@ func cloneBytes(b []byte) []byte {
 
 // NewMessageFromHex parses the sender hash from hex then calls NewMessage.
 func NewMessageFromHex(senderHashHex string, text string) (*Message, error) {
-	hash, err := hex.DecodeString(senderHashHex)
+	hash, err := ParseHash(senderHashHex)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode hash: %w", err)
+		return nil, err
 	}
 	return NewMessage(hash, text)
 }
@@ -219,6 +220,35 @@ func (m *Messenger) SendMessage(destHash []byte, text string) error {
 	return m.sendPacked(destHash, targetDest, msg)
 }
 
+const recallTimeout = 10 * time.Second
+
+func (m *Messenger) SendHash(destHex, text string) error {
+	return m.sendHash(destHex, text, recallTimeout)
+}
+
+func (m *Messenger) sendHash(destHex, text string, wait time.Duration) error {
+	destHash, err := ParseHash(destHex)
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(wait)
+	var last error
+	for {
+		remote, err := identity.Recall(destHash)
+		if err == nil && remote != nil {
+			return m.SendMessage(destHash, text)
+		}
+		last = err
+		if time.Now().After(deadline) {
+			if last != nil {
+				return fmt.Errorf("%w: %v", ErrRecall, last)
+			}
+			return ErrRecall
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // SendGroupMessage sends one MF packet to destHash tagged with groupHash.
 func (m *Messenger) SendGroupMessage(destHash, groupHash []byte, text string) error {
 	if len(destHash) != SenderHashLength {
@@ -282,14 +312,7 @@ func (m *Messenger) sendPacked(destHash []byte, targetDest *destination.Destinat
 
 // SenderHashFromHex decodes a 32-byte hex sender hash.
 func SenderHashFromHex(s string) ([]byte, error) {
-	hash, err := hex.DecodeString(s)
-	if err != nil {
-		return nil, err
-	}
-	if len(hash) != SenderHashLength {
-		return nil, fmt.Errorf(errFmtExpected, ErrInvalidHashLength, SenderHashLength, len(hash))
-	}
-	return hash, nil
+	return ParseHash(s)
 }
 
 // ValidateSenderHash checks length == SenderHashLength.

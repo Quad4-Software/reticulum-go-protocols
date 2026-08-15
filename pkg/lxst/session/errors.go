@@ -15,4 +15,5 @@ var (
 	ErrNoStream    = errors.New("missing pcm stream")
 	ErrFingerprint = errors.New("caller hash mismatch")
 	ErrUnknownName = errors.New("unknown profile or mode name")
+	ErrPCMDropped  = errors.New("host pcm capture dropped")
 )

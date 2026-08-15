@@ -58,3 +58,10 @@ func TestSwitchModeInvalid(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestSwitchProfileInvalid(t *testing.T) {
+	c := call.NewCall(nil, call.Config{UseAudio: false})
+	if err := c.SwitchProfile(0x99); err != call.ErrInvalidProfile {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -34,6 +34,9 @@ var (
 	ErrCallEnded       = errors.New("call ended before becoming active")
 	ErrStateTimeout    = errors.New("timeout waiting for call state")
 	ErrAnswerRaced     = errors.New("call no longer ringing")
+	ErrBlocked         = errors.New("caller blocked")
+	ErrRateLimited     = errors.New("rate limited")
+	ErrInvalidProfile  = errors.New("invalid call profile")
 )
 
 type State int32
@@ -157,6 +160,7 @@ type Call struct {
 	txArmed     atomic.Bool
 	opened      bool
 	started     bool
+	endErr      error
 	recvKind    byte
 	skipLeft    int
 	easeLeft    int
@@ -493,12 +497,23 @@ func (c *Call) SwitchProfile(profile int) error {
 	if profile == 0 {
 		profile = proto.DefaultProfile
 	}
+	if !proto.KnownProfile(profile) {
+		return ErrInvalidProfile
+	}
 	if c.state.Load() == int32(StateActive) {
-		c.switchProfile(profile)
+		if err := c.switchProfile(profile); err != nil {
+			return err
+		}
 		return c.sendSignals(proto.SignalPreferredProfile(profile))
 	}
 	c.applyProfile(profile)
 	return nil
+}
+
+func (c *Call) EndError() error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.endErr
 }
 
 func (c *Call) SwitchMode(mode int) error {

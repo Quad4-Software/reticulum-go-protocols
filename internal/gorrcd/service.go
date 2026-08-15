@@ -108,7 +108,7 @@ func (s *Service) Start() error {
 				s.stats.Inc("bytes_in", uint64(n)) // #nosec G115 -- n is packet length
 			}
 		},
-		OnBadPacket: func() {
+		OnBadPacket: func(error) {
 			s.stats.Inc("pkts_bad", 1)
 		},
 		OnRateLimited: func() {

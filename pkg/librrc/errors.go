@@ -66,7 +66,7 @@ func mapError(err error) int {
 		return ErrIO
 	case errors.Is(err, rrc.ErrDialTimeout), errors.Is(err, rrc.ErrWelcomeTimeout):
 		return ErrTimeout
-	case errors.Is(err, rrc.ErrNilArgument), errors.Is(err, rrc.ErrBadFieldLength), errors.Is(err, rrc.ErrWrongVersion):
+	case errors.Is(err, rrc.ErrNilArgument), errors.Is(err, rrc.ErrBadFieldLength), errors.Is(err, rrc.ErrWrongVersion), errors.Is(err, rrc.ErrInvalidHash):
 		return ErrInvalidArg
 	case errors.Is(err, errInternal):
 		return ErrInternal

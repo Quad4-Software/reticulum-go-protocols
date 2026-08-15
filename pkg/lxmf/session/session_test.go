@@ -13,6 +13,7 @@ import (
 	"quad4/reticulum-go-protocols/pkg/lxmf/session"
 	"quad4/reticulum-go/pkg/common"
 	"quad4/reticulum-go/pkg/identity"
+	"quad4/reticulum-go/pkg/packet"
 	"quad4/reticulum-go/pkg/transport"
 )
 
@@ -259,6 +260,43 @@ func TestAllowNoneDrops(t *testing.T) {
 	}
 	if b.Info().AllowPolicy != "none" {
 		t.Fatalf("allow %q", b.Info().AllowPolicy)
+	}
+}
+
+func TestAllowNoneLastError(t *testing.T) {
+	a, b, idB := pairedSessions(t)
+	b.SetAllowNone(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if _, err := a.Send(ctx, idB, "no", "thanks"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if errors.Is(b.LastError(), session.ErrNotAllowed) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("last error %v", b.LastError())
+}
+
+func TestReceiveErrorDecrypt(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	pkt := packet.NewPacket(
+		packet.DestinationSingle,
+		[]byte{1, 2, 3, 4, 5, 6, 7, 8},
+		packet.PacketTypeData,
+		packet.ContextNone,
+		packet.PropagationBroadcast,
+		packet.HeaderType1,
+		nil,
+		true,
+		packet.FlagUnset,
+	)
+	a.Messenger().Receive(pkt, nil)
+	if a.LastError() == nil {
+		t.Fatal("expected decrypt error")
 	}
 }
 

@@ -17,6 +17,10 @@ func LookupProfile(name string) (int, bool) {
 	return p, ok
 }
 
+func KnownProfile(profile int) bool {
+	return ProfileName(profile) != "unknown"
+}
+
 func ProfileFromName(name string) int {
 	if p, ok := LookupProfile(name); ok {
 		return p

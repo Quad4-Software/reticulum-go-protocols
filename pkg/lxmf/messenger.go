@@ -24,9 +24,10 @@ type Messenger struct {
 	transport *transport.Transport
 	dest      *destination.Destination
 
-	mu       sync.RWMutex
-	handler  MessageHandler
-	resolver SourceResolver
+	mu        sync.RWMutex
+	handler   MessageHandler
+	resolver  SourceResolver
+	onRecvErr func(error)
 
 	propLinkMu   sync.Mutex
 	propLink     *link.Link
@@ -89,6 +90,12 @@ func (m *Messenger) SetSourceResolver(r SourceResolver) {
 		return
 	}
 	m.resolver = r
+}
+
+func (m *Messenger) SetReceiveError(fn func(error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onRecvErr = fn
 }
 
 // Compose builds an outbound message from this destination as source.
@@ -178,6 +185,10 @@ func (m *Messenger) SendText(destinationHash []byte, title, content string) (*LX
 
 // SendStamped packs the message, generates a PoW stamp for stampCost, and sends opportunistically.
 func (m *Messenger) SendStamped(msg *LXMessage, stampCost int) error {
+	return m.SendStampedContext(context.Background(), msg, stampCost)
+}
+
+func (m *Messenger) SendStampedContext(ctx context.Context, msg *LXMessage, stampCost int) error {
 	if msg == nil {
 		return errors.New("lxmf: nil message")
 	}
@@ -191,8 +202,14 @@ func (m *Messenger) SendStamped(msg *LXMessage, stampCost int) error {
 	if _, err := msg.Pack(signer); err != nil {
 		return fmt.Errorf("pre-pack: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	defer cancel()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 15*time.Minute)
+		defer cancel()
+	}
 	stamp, value, err := GenerateStamp(ctx, msg.Hash, stampCost, WorkblockExpandRounds)
 	if err != nil {
 		return fmt.Errorf("stamp generation: %w", err)
@@ -267,6 +284,7 @@ func (m *Messenger) Receive(pkt *packet.Packet, iface common.NetworkInterface) {
 	plaintext, err := m.decryptInbound(pkt.Data)
 	if err != nil {
 		Warning("inbound lxmf decrypt failed", "error", err, "packet_len", len(pkt.Data))
+		m.receiveError(fmt.Errorf("decrypt: %w", err))
 		return
 	}
 
@@ -303,17 +321,19 @@ func (m *Messenger) onPacket(plaintext []byte, iface common.NetworkInterface) {
 	resolver := m.resolver
 	m.mu.RUnlock()
 
-	if handler == nil {
+	if len(plaintext) < DestinationLength+SignatureLength {
+		m.receiveError(fmt.Errorf("inbound: %w", ErrMessageTooShort))
 		return
 	}
 
-	if len(plaintext) < DestinationLength+SignatureLength {
+	if handler == nil {
 		return
 	}
 
 	msg, err := UnpackFromBytes(m.DestinationHash(), plaintext, resolver)
 	if err != nil && msg == nil {
 		Warning("inbound lxmf unpack failed", "error", err, "plaintext_len", len(plaintext))
+		m.receiveError(fmt.Errorf("unpack: %w", err))
 		return
 	}
 	if err != nil {
@@ -322,4 +342,16 @@ func (m *Messenger) onPacket(plaintext []byte, iface common.NetworkInterface) {
 	}
 
 	handler(msg, iface)
+}
+
+func (m *Messenger) receiveError(err error) {
+	if err == nil {
+		return
+	}
+	m.mu.RLock()
+	fn := m.onRecvErr
+	m.mu.RUnlock()
+	if fn != nil {
+		fn(err)
+	}
 }

@@ -2,6 +2,8 @@
 package rrc
 
 import (
+	"fmt"
+	"log"
 	"sync"
 
 	"quad4/reticulum-go/pkg/link"
@@ -17,7 +19,7 @@ type session struct {
 	closed   bool
 	onMsg    MessageHandler
 	onClose  func()
-	onBad    func()
+	onBad    func(error)
 	onBytes  func(n int)
 	autoPong bool
 }
@@ -86,18 +88,17 @@ func (s *session) sendType(msgType uint64, room string, body any, nick string) e
 }
 
 func (s *session) handleInbound(data []byte) {
-	defer recoverDiscard()
+	defer func() {
+		if r := recover(); r != nil {
+			s.reportBad(fmt.Errorf("panic: %v", r))
+		}
+	}()
 	if s.onBytes != nil {
 		s.onBytes(len(data))
 	}
 	env, err := UnmarshalEnvelope(data)
 	if err != nil {
-		s.mu.Lock()
-		bad := s.onBad
-		s.mu.Unlock()
-		if bad != nil {
-			bad()
-		}
+		s.reportBad(err)
 		return
 	}
 	if s.autoPong && env.Type == TypePing {
@@ -108,6 +109,19 @@ func (s *session) handleInbound(data []byte) {
 	s.mu.Unlock()
 	if h != nil {
 		h(env)
+	}
+}
+
+func (s *session) reportBad(err error) {
+	if err == nil {
+		return
+	}
+	log.Printf("rrc: bad packet: %v", err)
+	s.mu.Lock()
+	bad := s.onBad
+	s.mu.Unlock()
+	if bad != nil {
+		bad(err)
 	}
 }
 

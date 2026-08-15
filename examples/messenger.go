@@ -22,8 +22,9 @@ const (
 	announceTimeout = 10 * time.Second
 	exampleAppName  = "mf"
 	exampleMessage  = "Hello from reticulum-go-protocols!"
-	udpListenAddr   = "0.0.0.0:4242"
-	udpIfaceName    = "UDPInterface"
+	// Loopback bind for this example. Not a mesh listen address.
+	udpListenAddr = "127.0.0.1:4242"
+	udpIfaceName  = "UDPInterface"
 )
 
 func main() {

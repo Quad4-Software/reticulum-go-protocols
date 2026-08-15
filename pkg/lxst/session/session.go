@@ -413,8 +413,12 @@ func (s *Session) PushPCM(pcm []int16) error {
 	if s.host == nil {
 		return ErrNoHost
 	}
+	before := s.host.Stats().CaptureDropped
 	if err := s.host.Push(pcm); err != nil {
-		return fmt.Errorf("push pcm: %w", err)
+		return s.fail(fmt.Errorf("push pcm: %w", err))
+	}
+	if s.host.Stats().CaptureDropped > before {
+		return s.fail(ErrPCMDropped)
 	}
 	return nil
 }
@@ -423,8 +427,12 @@ func (s *Session) PushPCMBytes(raw []byte) error {
 	if s.host == nil {
 		return ErrNoHost
 	}
+	before := s.host.Stats().CaptureDropped
 	if err := s.host.PushBytes(raw); err != nil {
-		return fmt.Errorf("push pcm: %w", err)
+		return s.fail(fmt.Errorf("push pcm: %w", err))
+	}
+	if s.host.Stats().CaptureDropped > before {
+		return s.fail(ErrPCMDropped)
 	}
 	return nil
 }
@@ -504,11 +512,14 @@ func (s *Session) callEvents() call.Events {
 				fn()
 			}
 		},
-		OnEnded: func(_ *call.Call, reason string) {
+		OnEnded: func(c *call.Call, reason string) {
 			s.mutex.Lock()
 			s.reason = reason
 			fn := s.events.OnEnded
 			s.mutex.Unlock()
+			if err := c.EndError(); err != nil {
+				_ = s.fail(err)
+			}
 			s.note("ended", "reason", reason)
 			s.emitState()
 			if fn != nil {
