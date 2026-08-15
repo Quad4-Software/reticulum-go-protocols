@@ -140,16 +140,29 @@ func runInterop(req map[string]any) (interopResponse, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		var resp interopResponse
-		if jsonErr := json.Unmarshal(bytes.TrimSpace(out), &resp); jsonErr == nil && (resp.Error != "" || resp.Trace != "") {
+		if jsonErr := decodeHarnessOutput(out, &resp); jsonErr == nil && (resp.Error != "" || resp.Trace != "") {
 			return resp, fmt.Errorf("%s", resp.Error)
 		}
 		return zero, fmt.Errorf("uv run harness: %w: %s", err, string(out))
 	}
 	var resp interopResponse
-	if err := json.Unmarshal(bytes.TrimSpace(out), &resp); err != nil {
+	if err := decodeHarnessOutput(out, &resp); err != nil {
 		return zero, fmt.Errorf("decode harness output: %w: %s", err, string(out))
 	}
 	return resp, nil
+}
+
+func decodeHarnessOutput(out []byte, resp *interopResponse) error {
+	out = bytes.TrimSpace(out)
+	if len(out) == 0 {
+		return fmt.Errorf("empty harness output")
+	}
+	if out[0] != '{' {
+		if i := bytes.LastIndexByte(out, '{'); i >= 0 {
+			out = out[i:]
+		}
+	}
+	return json.Unmarshal(out, resp)
 }
 
 func outDeliveryHash(t *testing.T, id *identity.Identity) []byte {

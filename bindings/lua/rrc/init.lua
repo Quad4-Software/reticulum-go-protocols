@@ -238,6 +238,7 @@ function M.hub_peer_count(h)
 end
 
 local function slice_bytes(arr, len)
+	len = tonumber(len) or 0
 	local out = {}
 	for i = 0, len - 1 do
 		out[#out + 1] = string.char(arr[i])

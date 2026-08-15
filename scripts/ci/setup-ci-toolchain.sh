@@ -20,5 +20,9 @@ if [ "${CI_INSTALL_GOSEC:-0}" = "1" ] && [ -n "${CI_GOSEC_VERSION:-}" ]; then
 	sh "$ROOT/scripts/ci/setup-gosec.sh" "$CI_GOSEC_VERSION"
 fi
 
+if [ "${CI_INSTALL_APT_DEPS:-1}" = "1" ]; then
+	sh "$ROOT/scripts/ci/setup-ci-apt-deps.sh"
+fi
+
 export PATH="/usr/local/go/bin:${PATH}"
 go version

@@ -10,8 +10,18 @@ import (
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
 )
 
+func stdinFd() int {
+	const maxInt = int64(^uint(0) >> 1)
+	fd := os.Stdin.Fd()
+	if fd > uintptr(maxInt) {
+		return -1
+	}
+	return int(fd)
+}
+
 func stdinTTY() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	fd := stdinFd()
+	return fd >= 0 && term.IsTerminal(fd)
 }
 
 func (s *session) enterCallConsole(c *call.Call) {
@@ -32,7 +42,11 @@ func (s *session) runHalfDuplexKeys(c *call.Call) {
 	fmt.Println("  h           hang up")
 	fmt.Println("  f           switch to full duplex")
 	fmt.Println("  m           toggle mute")
-	fd := int(os.Stdin.Fd())
+	fd := stdinFd()
+	if fd < 0 {
+		s.runLineCallConsole(c)
+		return
+	}
 	old, err := term.MakeRaw(fd)
 	if err != nil {
 		fmt.Println("raw terminal:", err)

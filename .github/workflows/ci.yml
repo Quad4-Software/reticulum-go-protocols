@@ -327,7 +327,7 @@ jobs:
             suite: interop-lxst
             extra_setup: |
               sudo apt-get update -qq
-              sudo apt-get install -y cmake libcodec2-dev
+              sudo apt-get install -y cmake libcodec2-dev libopus-dev
               python3 -m venv .venv-lxst
               .venv-lxst/bin/pip install -U pip
               .venv-lxst/bin/pip install "rns" "lxst==0.5.1" numpy pycodec2
@@ -439,6 +439,8 @@ jobs:
         with:
           persist-credentials: false
       - run: sh scripts/ci/setup-ci-toolchain.sh
+      - name: Install hub-client language extras
+        run: sudo apt-get update -qq && sudo apt-get install -y luajit
       - run: sh scripts/ci/run-hub-client-bindings.sh
       - run: sh scripts/ci/verify-workspace-clean.sh
 
@@ -455,7 +457,7 @@ jobs:
           persist-credentials: false
       - run: sh scripts/ci/setup-ci-toolchain.sh
       - name: Install build tools
-        run: sudo apt-get update -qq && sudo apt-get install -y cmake curl
+        run: sudo apt-get update -qq && sudo apt-get install -y cmake curl libopus-dev libcodec2-dev
       - name: Build rnphone and rgesp-dial
         env:
           CGO_ENABLED: "1"

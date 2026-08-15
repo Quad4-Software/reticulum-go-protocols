@@ -1,4 +1,4 @@
-//go:build linux && !386
+//go:build linux && amd64
 
 // SPDX-License-Identifier: Apache-2.0
 package sandbox

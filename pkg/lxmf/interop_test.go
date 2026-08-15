@@ -18,6 +18,17 @@ import (
 	"quad4/reticulum-go/pkg/transport"
 )
 
+func TestDecodeHarnessOutputSkipsUVPreamble(t *testing.T) {
+	raw := []byte("Using CPython 3.12.3 interpreter at: /usr/bin/python3\nCreating virtual environment at: .venv\n{\"ok\": true, \"lxmf_version\": \"1.1.0\"}\n")
+	var resp interopResponse
+	if err := decodeHarnessOutput(raw, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK || resp.LXMFVersion != "1.1.0" {
+		t.Fatalf("resp=%+v", resp)
+	}
+}
+
 func TestInterop_Ping(t *testing.T) {
 	requireInterop(t)
 	resp := interopCall(t, map[string]any{"cmd": "ping"})

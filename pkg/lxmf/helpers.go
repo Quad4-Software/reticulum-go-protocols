@@ -524,8 +524,8 @@ func asInt64(v any) (int64, bool) {
 	case int64:
 		return x, true
 	case uint:
-		const maxInt64 uint = 1<<63 - 1
-		if x > maxInt64 {
+		const maxInt64AsUint = ^uint(0) >> 1
+		if x > maxInt64AsUint {
 			return 0, false
 		}
 		return int64(x), true
