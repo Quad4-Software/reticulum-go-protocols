@@ -3,7 +3,6 @@ package call
 
 import (
 	"context"
-	"time"
 
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
 	"quad4/reticulum-go/pkg/debug"
@@ -14,7 +13,9 @@ import (
 
 func (c *Call) resendAvailableUntilIdentified() {
 	for range availableResendCount {
-		time.Sleep(availableResendGap)
+		if c.sleepEnded(availableResendGap) {
+			return
+		}
 		if !c.incoming.Load() {
 			return
 		}
@@ -59,7 +60,9 @@ func (c *Call) identifyOnce() {
 }
 
 func (c *Call) identifyIfStillConnecting() {
-	time.Sleep(identifyDelay)
+	if c.sleepEnded(identifyDelay) {
+		return
+	}
 	for range identifyRetryCount {
 		if c.state.Load() != int32(StateConnecting) {
 			return
@@ -71,7 +74,9 @@ func (c *Call) identifyIfStillConnecting() {
 		if c.identified.Load() {
 			return
 		}
-		time.Sleep(identifyRetryGap)
+		if c.sleepEnded(identifyRetryGap) {
+			return
+		}
 	}
 }
 
@@ -105,7 +110,9 @@ func (c *Call) onIdentified(_ *link.Link, id *identity.Identity) {
 }
 
 func (c *Call) autoAnswer() {
-	time.Sleep(c.cfg.AutoAnswer)
+	if c.sleepEnded(c.cfg.AutoAnswer) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.ConnectTime)
 	defer cancel()
 	_ = c.Answer(ctx)
@@ -280,7 +287,7 @@ func (c *Call) handleFrame(frame []byte) {
 		return
 	}
 	seq := uint16(c.frameSeq.Add(1)) // #nosec G115 -- 16-bit media sequence wraps
-	c.jitter.Push(seq, 0, frame)
+	c.jitter.PushOwned(seq, 0, frame)
 	c.recvCount.Add(1)
 	c.wakeRecv()
 }

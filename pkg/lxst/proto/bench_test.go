@@ -53,7 +53,7 @@ func TestUnpackAllocsBounded(t *testing.T) {
 	n := testing.AllocsPerRun(200, func() {
 		_, _ = proto.Unpack(raw)
 	})
-	if n > 40 {
+	if n > 16 {
 		t.Fatalf("unpack allocs %v", n)
 	}
 }

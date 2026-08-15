@@ -23,6 +23,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -389,8 +390,11 @@ func (s *Session) resolveDest(ctx context.Context, destHex string) ([]byte, erro
 	if err := ctx.Err(); err != nil {
 		return nil, s.fail(fmt.Errorf("send: %w", err))
 	}
-	remote, err := waitRecall(s.cfg.Transport, candidates, timeout)
+	remote, err := waitRecall(ctx, s.cfg.Transport, candidates, timeout)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, s.fail(fmt.Errorf("send: %w", err))
+		}
 		return nil, s.fail(fmt.Errorf("%w: %s", ErrRecall, FormatHash(raw)))
 	}
 	dest, err := lxmf.DeliveryHash(remote)
@@ -547,6 +551,9 @@ func (s *Session) note(event string, kv ...string) {
 	if logFn != nil {
 		logFn(event, kv...)
 	}
+	if !debug.Enabled(debug.DebugInfo) {
+		return
+	}
 	args := make([]any, 0, len(kv))
 	for _, v := range kv {
 		args = append(args, v)
@@ -589,9 +596,15 @@ type pathTransport interface {
 	RequestPath([]byte, string, []byte, bool) error
 }
 
-func waitRecall(t pathTransport, hashes [][]byte, timeout time.Duration) (*identity.Identity, error) {
+func waitRecall(ctx context.Context, t pathTransport, hashes [][]byte, timeout time.Duration) (*identity.Identity, error) {
 	if t == nil {
 		return nil, fmt.Errorf("missing transport")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	for _, h := range hashes {
 		if len(h) == 0 {
@@ -602,6 +615,11 @@ func waitRecall(t pathTransport, hashes [][]byte, timeout time.Duration) (*ident
 		}
 	}
 	deadline := time.Now().Add(timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	timer := time.NewTimer(recallPollInterval)
+	defer timer.Stop()
 	for {
 		for _, h := range hashes {
 			if len(h) == 0 {
@@ -614,7 +632,15 @@ func waitRecall(t pathTransport, hashes [][]byte, timeout time.Duration) (*ident
 		if !time.Now().Before(deadline) {
 			break
 		}
-		time.Sleep(recallPollInterval)
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("could not recall identity")
+		case <-timer.C:
+			timer.Reset(recallPollInterval)
+		}
 	}
 	return nil, fmt.Errorf("could not recall identity")
 }

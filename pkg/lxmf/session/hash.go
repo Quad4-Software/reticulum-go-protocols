@@ -13,18 +13,7 @@ import (
 const hashGroup = 4
 
 func ParseHash(s string) ([]byte, error) {
-	s = strings.TrimSpace(s)
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, ":", "")
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, "-", "")
-	if strings.HasPrefix(s, "<") && strings.HasSuffix(s, ">") {
-		s = s[1 : len(s)-1]
-	}
-	if s == "" {
-		return nil, fmt.Errorf("%w: empty", ErrInvalidHash)
-	}
-	raw, err := hex.DecodeString(s)
+	raw, err := decodeHashHex(s)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidHash, err)
 	}
@@ -38,14 +27,55 @@ func FormatHash(hash []byte) string {
 	if len(hash) == 0 {
 		return ""
 	}
-	hexs := strings.ToLower(hex.EncodeToString(hash))
+	n := hex.EncodedLen(len(hash))
+	var hexBuf [72]byte
+	if n > len(hexBuf) {
+		tmp := make([]byte, n)
+		hex.Encode(tmp, hash)
+		return formatGroupedBytes(tmp, hashGroup)
+	}
+	hex.Encode(hexBuf[:n], hash)
+	return formatGroupedBytes(hexBuf[:n], hashGroup)
+}
+
+func formatGroupedBytes(hexs []byte, group int) string {
 	var b strings.Builder
-	for i := 0; i < len(hexs); i += hashGroup {
+	groups := (len(hexs) + group - 1) / group
+	b.Grow(len(hexs) + max(groups-1, 0))
+	for i := 0; i < len(hexs); i += group {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		end := min(i+hashGroup, len(hexs))
-		b.WriteString(hexs[i:end])
+		end := min(i+group, len(hexs))
+		b.Write(hexs[i:end])
 	}
 	return b.String()
+}
+
+func decodeHashHex(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '<' && s[len(s)-1] == '>' {
+		s = s[1 : len(s)-1]
+	}
+	var buf [128]byte
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ':' || c == ' ' || c == '-' {
+			continue
+		}
+		if n >= len(buf) {
+			return nil, fmt.Errorf("too long")
+		}
+		buf[n] = c
+		n++
+	}
+	if n == 0 {
+		return nil, fmt.Errorf("empty")
+	}
+	out := make([]byte, hex.DecodedLen(n))
+	if _, err := hex.Decode(out, buf[:n]); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

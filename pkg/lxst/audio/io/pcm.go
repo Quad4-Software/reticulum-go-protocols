@@ -3,7 +3,10 @@
 //revive:disable:var-naming
 package io
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 const MaxPCMBytes = 256 * 1024
 
@@ -13,8 +16,7 @@ func PCM16LE(pcm []int16) []byte {
 	}
 	out := make([]byte, len(pcm)*2)
 	for i, s := range pcm {
-		out[i*2] = byte(s)
-		out[i*2+1] = byte(s >> 8)
+		binary.LittleEndian.PutUint16(out[i*2:], uint16(s)) // #nosec G115 -- PCM is two's complement 16-bit
 	}
 	return out
 }
@@ -31,7 +33,7 @@ func FromPCM16LE(raw []byte) ([]int16, error) {
 	}
 	out := make([]int16, len(raw)/2)
 	for i := range out {
-		out[i] = int16(raw[i*2]) | int16(raw[i*2+1])<<8
+		out[i] = int16(binary.LittleEndian.Uint16(raw[i*2:])) // #nosec G115 -- PCM is two's complement 16-bit
 	}
 	return out, nil
 }

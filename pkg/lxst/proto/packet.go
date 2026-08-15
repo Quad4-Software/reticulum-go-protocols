@@ -14,6 +14,10 @@ import (
 	"quad4/msgpack/v5/pkg/msgpack/msgpcode"
 )
 
+var unpackReaderPool = sync.Pool{
+	New: func() any { return bytes.NewReader(nil) },
+}
+
 var (
 	ErrEmptyPacket    = errors.New("empty lxst packet")
 	ErrMissingFields  = errors.New("lxst packet has no signalling or frames")
@@ -22,7 +26,6 @@ var (
 
 const (
 	maxMapKeys = 4
-	maxInt     = int(^uint(0) >> 1)
 	packBufCap = 128
 )
 
@@ -90,8 +93,20 @@ func Unpack(data []byte) (Packet, error) {
 	if len(data) > MaxUnpackBytes {
 		return Packet{}, ErrPacketTooLarge
 	}
-	dec := msgpack.NewDecoder(bytes.NewReader(data))
+	r := unpackReaderPool.Get().(*bytes.Reader)
+	r.Reset(data)
+	dec := msgpack.GetDecoder()
+	dec.Reset(r)
 	dec.SetDecodeDepthLimit(8)
+	pkt, err := unpackMap(dec)
+	dec.SetDecodeDepthLimit(0)
+	msgpack.PutDecoder(dec)
+	r.Reset(nil)
+	unpackReaderPool.Put(r)
+	return pkt, err
+}
+
+func unpackMap(dec *msgpack.Decoder) (Packet, error) {
 	n, err := dec.DecodeMapLen()
 	if err != nil {
 		return Packet{}, err
@@ -104,11 +119,10 @@ func Unpack(data []byte) (Packet, error) {
 	}
 	pkt := Packet{}
 	for range n {
-		k, err := dec.DecodeInterface()
+		key, ok, err := decodeIntOrSkip(dec)
 		if err != nil {
 			return Packet{}, err
 		}
-		key, ok := asInt(k)
 		if !ok {
 			if err := dec.Skip(); err != nil {
 				return Packet{}, err
@@ -169,9 +183,12 @@ var packPool = sync.Pool{
 func marshalCompact(v any) ([]byte, error) {
 	eb := packPool.Get().(*encoderBuf)
 	eb.b = eb.b[:0]
-	enc := msgpack.NewEncoder(eb)
+	enc := msgpack.GetEncoder()
+	enc.Reset(eb)
 	enc.UseCompactInts(true)
-	if err := enc.Encode(v); err != nil {
+	err := enc.Encode(v)
+	msgpack.PutEncoder(enc)
+	if err != nil {
 		eb.b = eb.b[:0]
 		packPool.Put(eb)
 		return nil, err
@@ -219,21 +236,21 @@ func decodeSignals(dec *msgpack.Decoder) ([]int, error) {
 		}
 		out := make([]int, 0, n)
 		for range n {
-			v, err := dec.DecodeInterface()
+			num, ok, err := decodeIntOrSkip(dec)
 			if err != nil {
 				return nil, err
 			}
-			if num, ok := asInt(v); ok {
+			if ok {
 				out = append(out, num)
 			}
 		}
 		return out, nil
 	}
-	v, err := dec.DecodeInterface()
+	num, ok, err := decodeIntOrSkip(dec)
 	if err != nil {
 		return nil, err
 	}
-	if num, ok := asInt(v); ok {
+	if ok {
 		return []int{num}, nil
 	}
 	return nil, ErrMissingFields
@@ -285,44 +302,22 @@ func decodeOneFrame(dec *msgpack.Decoder) ([]byte, error) {
 	if len(b) > MaxFrameBytes {
 		return nil, ErrPacketTooLarge
 	}
-	return append([]byte(nil), b...), nil
+	return b, nil
 }
 
-func asInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case int8:
-		return int(n), true
-	case int16:
-		return int(n), true
-	case int32:
-		return int(n), true
-	case int64:
-		if n > int64(maxInt) || n < int64(-maxInt-1) {
-			return 0, false
-		}
-		return int(n), true
-	case uint:
-		if n > uint(maxInt) {
-			return 0, false
-		}
-		return int(n), true
-	case uint8:
-		return int(n), true
-	case uint16:
-		return int(n), true
-	case uint32:
-		if uint64(n) > uint64(maxInt) {
-			return 0, false
-		}
-		return int(n), true
-	case uint64:
-		if n > uint64(maxInt) {
-			return 0, false
-		}
-		return int(n), true
-	default:
-		return 0, false
+func decodeIntOrSkip(dec *msgpack.Decoder) (int, bool, error) {
+	code, err := dec.PeekCode()
+	if err != nil {
+		return 0, false, err
 	}
+	if msgpcode.IsFixedNum(code) ||
+		code == msgpcode.Int8 || code == msgpcode.Int16 || code == msgpcode.Int32 || code == msgpcode.Int64 ||
+		code == msgpcode.Uint8 || code == msgpcode.Uint16 || code == msgpcode.Uint32 || code == msgpcode.Uint64 {
+		n, err := dec.DecodeInt()
+		return n, true, err
+	}
+	if err := dec.Skip(); err != nil {
+		return 0, false, err
+	}
+	return 0, false, nil
 }

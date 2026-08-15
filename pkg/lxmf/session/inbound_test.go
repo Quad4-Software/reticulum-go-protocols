@@ -2,8 +2,10 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"quad4/reticulum-go-protocols/pkg/lxmf"
 	"quad4/reticulum-go/pkg/common"
@@ -51,6 +53,21 @@ func TestDropUnverifiedFails(t *testing.T) {
 	default:
 	}
 }
+
+func TestWaitRecallHonorsCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := waitRecall(ctx, stubPath{}, [][]byte{make([]byte, lxmf.DestinationLength)}, time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+type stubPath struct{}
+
+func (stubPath) HasPath([]byte) bool { return false }
+
+func (stubPath) RequestPath([]byte, string, []byte, bool) error { return nil }
 
 func openTestSession(t *testing.T, cfg Config) *Session {
 	t.Helper()

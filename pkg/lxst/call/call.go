@@ -160,6 +160,8 @@ type Call struct {
 	txArmed     atomic.Bool
 	opened      bool
 	started     bool
+	endOnce     sync.Once
+	ended       chan struct{}
 	endErr      error
 	recvKind    byte
 	skipLeft    int
@@ -186,6 +188,7 @@ func NewCall(t *transport.Transport, cfg Config) *Call {
 		stateWait: make(chan struct{}, 1),
 		recvWake:  make(chan struct{}, 1),
 		txArm:     make(chan struct{}, 1),
+		ended:     make(chan struct{}),
 		adaptive:  media.NewAdaptiveController(),
 		bandpass:  filter.NewBandPass(speechLowHz, speechHighHz, io.DefaultSampleRate),
 		agc:       filter.NewAGC(defaultAGCdB),
@@ -609,6 +612,29 @@ func (c *Call) armTX() {
 	}
 }
 
+func (c *Call) sleepEnded(d time.Duration) bool {
+	if d <= 0 {
+		return c.endedClosed()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return c.endedClosed()
+	case <-c.ended:
+		return true
+	}
+}
+
+func (c *Call) endedClosed() bool {
+	select {
+	case <-c.ended:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Call) armTimeout(d time.Duration, stillWaiting func() bool, reason string) {
 	if d <= 0 {
 		return
@@ -616,14 +642,22 @@ func (c *Call) armTimeout(d time.Duration, stillWaiting func() bool, reason stri
 	go func() {
 		timer := time.NewTimer(d)
 		defer timer.Stop()
-		<-timer.C
-		if stillWaiting() && c.state.Load() != int32(StateEnded) && c.state.Load() != int32(StateIdle) {
-			c.end(reason)
+		select {
+		case <-timer.C:
+			if stillWaiting() && c.state.Load() != int32(StateEnded) && c.state.Load() != int32(StateIdle) {
+				c.end(reason)
+			}
+		case <-c.ended:
 		}
 	}()
 }
 
 func (c *Call) end(reason string) {
+	c.endOnce.Do(func() {
+		if c.ended != nil {
+			close(c.ended)
+		}
+	})
 	if !c.casState(StateActive, StateEnded) &&
 		!c.casState(StateRinging, StateEnded) &&
 		!c.casState(StateConnecting, StateEnded) {

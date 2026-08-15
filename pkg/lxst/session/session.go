@@ -20,6 +20,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -250,8 +251,11 @@ func (s *Session) DialHash(ctx context.Context, destHex string) (*call.Call, err
 		candidates = append(candidates, proto.TelephonyHash(raw))
 	}
 	s.note("recall", "hash", call.FormatHash(raw))
-	remote, err := rnsnode.WaitRecall(s.cfg.Transport, candidates, s.recall)
+	remote, err := rnsnode.WaitRecallContext(ctx, s.cfg.Transport, candidates, s.recall)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, s.fail(fmt.Errorf("dial: %w", err))
+		}
 		return nil, s.fail(fmt.Errorf("%w: %s", ErrRecall, call.FormatHash(raw)))
 	}
 	return s.Dial(ctx, remote)
@@ -568,6 +572,9 @@ func (s *Session) note(event string, kv ...string) {
 	s.mutex.Unlock()
 	if logFn != nil {
 		logFn(event, kv...)
+	}
+	if !debug.Enabled(debug.DebugInfo) {
+		return
 	}
 	args := make([]any, 0, len(kv))
 	for _, v := range kv {

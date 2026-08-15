@@ -79,12 +79,8 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 	if !tr.HasPath(hubHash) {
 		_ = tr.RequestPath(hubHash, "", nil, true)
 	}
-	pathDeadline := time.Now().Add(cfg.DialTimeout)
-	for !tr.HasPath(hubHash) {
-		if time.Now().After(pathDeadline) {
-			return nil, fmt.Errorf("%w: no path", ErrDialTimeout)
-		}
-		time.Sleep(50 * time.Millisecond)
+	if !waitUntil(cfg.DialTimeout, 50*time.Millisecond, func() bool { return tr.HasPath(hubHash) }) {
+		return nil, fmt.Errorf("%w: no path", ErrDialTimeout)
 	}
 
 	remote, err := identity.Recall(hubHash)
@@ -122,13 +118,9 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 	}
 	lnk.Start()
 
-	deadline := time.Now().Add(cfg.DialTimeout)
-	for !lnk.IsActive() {
-		if time.Now().After(deadline) {
-			lnk.Teardown()
-			return nil, fmt.Errorf("%w: link", ErrDialTimeout)
-		}
-		time.Sleep(25 * time.Millisecond)
+	if !waitUntil(cfg.DialTimeout, 25*time.Millisecond, lnk.IsActive) {
+		lnk.Teardown()
+		return nil, fmt.Errorf("%w: link", ErrDialTimeout)
 	}
 
 	if err := lnk.Identify(id); err != nil {
@@ -144,6 +136,8 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 		return nil, err
 	}
 
+	welcomeTimer := time.NewTimer(cfg.WelcomeTimeout)
+	defer welcomeTimer.Stop()
 	select {
 	case env := <-welcomeCh:
 		body, err := ParseWelcomeBody(env.Body)
@@ -159,7 +153,7 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 		if h != nil {
 			h(body, env)
 		}
-	case <-time.After(cfg.WelcomeTimeout):
+	case <-welcomeTimer.C:
 		lnk.Teardown()
 		return nil, ErrWelcomeTimeout
 	case <-closedCh:
@@ -476,4 +470,22 @@ func (c *Client) Close() {
 		c.sess.close()
 	}
 	c.onLinkClosed()
+}
+
+func waitUntil(timeout, interval time.Duration, ok func() bool) bool {
+	if ok() {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for range tick.C {
+		if ok() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return ok()
+		}
+	}
+	return false
 }

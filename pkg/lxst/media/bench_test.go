@@ -19,6 +19,20 @@ func BenchmarkJitterPushPop(b *testing.B) {
 	}
 }
 
+func TestJitterPushOwnedNoCopy(t *testing.T) {
+	jb := media.NewJitterBuffer(40, 32)
+	payload := []byte{1, 2, 3}
+	jb.PushOwned(1, 1, payload)
+	payload[0] = 9
+	frame, ok := jb.PopReady(time.Now())
+	if !ok {
+		t.Fatal("missing frame")
+	}
+	if frame.Payload[0] != 9 {
+		t.Fatalf("payload %v", frame.Payload)
+	}
+}
+
 func TestJitterPushAllocs(t *testing.T) {
 	jb := media.NewJitterBuffer(40, 32)
 	payload := []byte{1, 2, 3, 4}

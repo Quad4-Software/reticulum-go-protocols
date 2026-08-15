@@ -15,7 +15,7 @@ type RateLimiter struct {
 	mutex    sync.Mutex
 	interval time.Duration
 	burst    int
-	buckets  map[string]*bucket
+	buckets  map[[16]byte]*bucket
 }
 
 type bucket struct {
@@ -30,14 +30,14 @@ func NewRateLimiter(interval time.Duration, burst int) *RateLimiter {
 	if burst <= 0 {
 		burst = DefaultRateBurst
 	}
-	return &RateLimiter{interval: interval, burst: burst, buckets: map[string]*bucket{}}
+	return &RateLimiter{interval: interval, burst: burst, buckets: map[[16]byte]*bucket{}}
 }
 
 func (r *RateLimiter) Allow(hash []byte) bool {
 	if r == nil {
 		return true
 	}
-	key := string(hash)
+	key := rateHashKey(hash)
 	now := time.Now()
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -87,4 +87,9 @@ func (r *RateLimiter) pruneLocked(now time.Time) {
 			return
 		}
 	}
+}
+
+func rateHashKey(hash []byte) (key [16]byte) {
+	copy(key[:], hash)
+	return key
 }

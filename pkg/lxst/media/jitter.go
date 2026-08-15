@@ -60,6 +60,14 @@ func (j *JitterBuffer) TargetMs() int {
 }
 
 func (j *JitterBuffer) Push(seq uint16, timestamp uint32, payload []byte) {
+	j.push(seq, timestamp, append([]byte(nil), payload...))
+}
+
+func (j *JitterBuffer) PushOwned(seq uint16, timestamp uint32, payload []byte) {
+	j.push(seq, timestamp, payload)
+}
+
+func (j *JitterBuffer) push(seq uint16, timestamp uint32, payload []byte) {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 	j.recvCount++
@@ -77,7 +85,7 @@ func (j *JitterBuffer) Push(seq uint16, timestamp uint32, payload []byte) {
 	j.frames[seq] = Frame{
 		Sequence:  seq,
 		Timestamp: timestamp,
-		Payload:   append([]byte(nil), payload...),
+		Payload:   payload,
 		Arrival:   now,
 	}
 	if len(j.frames) > j.maxFrames {

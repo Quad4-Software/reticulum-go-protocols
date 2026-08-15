@@ -3,6 +3,8 @@ package rnsnode_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -171,6 +173,16 @@ func TestWaitRecallTimeout(t *testing.T) {
 	miss := bytes.Repeat([]byte{0x22}, 16)
 	if _, err := rnsnode.WaitRecall(&stubPath{}, [][]byte{miss}, 50*time.Millisecond); err == nil {
 		t.Fatal("expected timeout")
+	}
+}
+
+func TestWaitRecallContextCanceled(t *testing.T) {
+	miss := bytes.Repeat([]byte{0x33}, 16)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := rnsnode.WaitRecallContext(ctx, &stubPath{}, [][]byte{miss}, time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
 	}
 }
 

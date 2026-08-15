@@ -435,12 +435,23 @@ func clampPercent(v int) int {
 }
 
 func (c *Call) stopRingtone() {
+	c.mutex.Lock()
 	c.ringOnce.Do(func() {
 		if c.ringStop != nil {
 			close(c.ringStop)
 		}
 	})
+	c.mutex.Unlock()
 	c.ringWG.Wait()
+}
+
+func (c *Call) ringtoneStoppedLocked() bool {
+	select {
+	case <-c.ringStop:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Call) ringtoneClip() *opusfile.Clip {
@@ -461,7 +472,13 @@ func (c *Call) startRingtone() {
 	if !c.cfg.UseAudio {
 		return
 	}
-	if clip := c.ringtoneClip(); clip != nil {
+	clip := c.ringtoneClip()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.ringtoneStoppedLocked() {
+		return
+	}
+	if clip != nil {
 		c.playLoop(clip, c.cfg.Ringer)
 		return
 	}
@@ -475,6 +492,11 @@ func (c *Call) startRingtone() {
 }
 
 func (c *Call) startDialTone() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.ringtoneStoppedLocked() {
+		return
+	}
 	c.playCadence(c.cfg.Speaker, func(buf, _ []int16, pos uint64) {
 		if tone.DialOn(pos, io.DefaultSampleRate) {
 			c.dial.Fill(buf)
@@ -561,6 +583,8 @@ func (c *Call) startBusyTone() {
 		var pos uint64
 		for time.Now().Before(deadline) {
 			select {
+			case <-c.ended:
+				return
 			case <-ticker.C:
 			}
 			clear(buf)

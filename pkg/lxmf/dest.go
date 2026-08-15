@@ -34,3 +34,14 @@ func namedDestHash(identityHash []byte, appName string, aspects ...string) []byt
 	final := sha256.Sum256(combined)
 	return final[:DestinationLength:DestinationLength]
 }
+
+type destID [DestinationLength]byte
+
+func destIDFrom(h []byte) (destID, bool) {
+	var k destID
+	if len(h) != DestinationLength {
+		return k, false
+	}
+	copy(k[:], h)
+	return k, true
+}

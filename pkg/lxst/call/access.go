@@ -54,14 +54,27 @@ func FormatHash(hash []byte) string {
 	if len(hash) == 0 {
 		return ""
 	}
-	hexs := strings.ToLower(hex.EncodeToString(hash))
+	n := hex.EncodedLen(len(hash))
+	var hexBuf [72]byte
+	if n > len(hexBuf) {
+		tmp := make([]byte, n)
+		hex.Encode(tmp, hash)
+		return formatGroupedBytes(tmp, fingerprintGroup)
+	}
+	hex.Encode(hexBuf[:n], hash)
+	return formatGroupedBytes(hexBuf[:n], fingerprintGroup)
+}
+
+func formatGroupedBytes(hexs []byte, group int) string {
 	var b strings.Builder
-	for i := 0; i < len(hexs); i += fingerprintGroup {
+	groups := (len(hexs) + group - 1) / group
+	b.Grow(len(hexs) + max(groups-1, 0))
+	for i := 0; i < len(hexs); i += group {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		end := min(i+fingerprintGroup, len(hexs))
-		b.WriteString(hexs[i:end])
+		end := min(i+group, len(hexs))
+		b.Write(hexs[i:end])
 	}
 	return b.String()
 }

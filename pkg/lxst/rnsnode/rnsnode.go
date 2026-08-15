@@ -2,6 +2,7 @@
 package rnsnode
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -212,8 +213,18 @@ type pathTransport interface {
 }
 
 func WaitRecall(t pathTransport, hashes [][]byte, timeout time.Duration) (*identity.Identity, error) {
+	return WaitRecallContext(context.Background(), t, hashes, timeout)
+}
+
+func WaitRecallContext(ctx context.Context, t pathTransport, hashes [][]byte, timeout time.Duration) (*identity.Identity, error) {
 	if t == nil {
 		return nil, fmt.Errorf("missing transport")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	for _, h := range hashes {
 		if len(h) == 0 {
@@ -224,6 +235,11 @@ func WaitRecall(t pathTransport, hashes [][]byte, timeout time.Duration) (*ident
 		}
 	}
 	deadline := time.Now().Add(timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	timer := time.NewTimer(recallPollInterval)
+	defer timer.Stop()
 	for {
 		for _, h := range hashes {
 			if len(h) == 0 {
@@ -236,7 +252,15 @@ func WaitRecall(t pathTransport, hashes [][]byte, timeout time.Duration) (*ident
 		if !time.Now().Before(deadline) {
 			break
 		}
-		time.Sleep(recallPollInterval)
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("could not recall identity")
+		case <-timer.C:
+			timer.Reset(recallPollInterval)
+		}
 	}
 	return nil, fmt.Errorf("could not recall identity")
 }

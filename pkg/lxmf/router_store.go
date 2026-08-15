@@ -34,7 +34,7 @@ type MessageStore struct {
 	dir             string
 	entries         map[string]*PropagationEntry
 	limitBytes      int64
-	prioritisedDest map[string]struct{}
+	prioritisedDest map[destID]struct{}
 }
 
 // NewMessageStore loads existing files from dir and applies limitBytes (0 means unlimited).
@@ -45,14 +45,14 @@ func NewMessageStore(dir string, limitMB float64, prioritised [][]byte) (*Messag
 	ms := &MessageStore{
 		dir:             dir,
 		entries:         make(map[string]*PropagationEntry),
-		prioritisedDest: make(map[string]struct{}),
+		prioritisedDest: make(map[destID]struct{}),
 	}
 	if limitMB > 0 {
 		ms.limitBytes = int64(limitMB * 1000 * 1000)
 	}
 	for _, h := range prioritised {
-		if len(h) == DestinationLength {
-			ms.prioritisedDest[hex.EncodeToString(h)] = struct{}{}
+		if key, ok := destIDFrom(h); ok {
+			ms.prioritisedDest[key] = struct{}{}
 		}
 	}
 	if err := ms.load(); err != nil {
@@ -171,7 +171,7 @@ func (ms *MessageStore) Remove(transientID []byte) error {
 
 // PurgeForDestination removes entries matching destinationHash from have list processing.
 func (ms *MessageStore) Purge(transientIDs [][]byte, destinationHash []byte) int {
-	destKey := hex.EncodeToString(destinationHash)
+	destKey := append([]byte(nil), destinationHash...)
 	removed := 0
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -181,7 +181,7 @@ func (ms *MessageStore) Purge(transientIDs [][]byte, destinationHash []byte) int
 		if !ok {
 			continue
 		}
-		if hex.EncodeToString(ent.DestinationHash) != destKey {
+		if !bytesEqual(ent.DestinationHash, destKey) {
 			continue
 		}
 		delete(ms.entries, key)
@@ -195,7 +195,6 @@ func (ms *MessageStore) Purge(transientIDs [][]byte, destinationHash []byte) int
 
 // ListForDestination returns transient IDs for destination sorted by size ascending.
 func (ms *MessageStore) ListForDestination(destinationHash []byte) [][]byte {
-	destKey := hex.EncodeToString(destinationHash)
 	type item struct {
 		id   []byte
 		size int64
@@ -203,7 +202,7 @@ func (ms *MessageStore) ListForDestination(destinationHash []byte) [][]byte {
 	ms.mu.RLock()
 	items := make([]item, 0)
 	for key, ent := range ms.entries {
-		if hex.EncodeToString(ent.DestinationHash) != destKey {
+		if !bytesEqual(ent.DestinationHash, destinationHash) {
 			continue
 		}
 		tid, err := hex.DecodeString(key)
@@ -265,8 +264,10 @@ func (ms *MessageStore) Weight(transientID []byte) float64 {
 	now := time.Now().Unix()
 	ageWeight := float64(max(1, (now-int64(ent.ReceivedAt))/((24*60*60)/4)))
 	priority := 1.0
-	if _, ok := ms.prioritisedDest[hex.EncodeToString(ent.DestinationHash)]; ok {
-		priority = 0.1
+	if key, ok := destIDFrom(ent.DestinationHash); ok {
+		if _, hit := ms.prioritisedDest[key]; hit {
+			priority = 0.1
+		}
 	}
 	return priority * ageWeight * float64(ent.Size)
 }
@@ -328,8 +329,10 @@ func (ms *MessageStore) enforceLimitLocked() int64 {
 		now := time.Now().Unix()
 		ageWeight := float64(max(1, (now-int64(ent.ReceivedAt))/((24*60*60)/4)))
 		priority := 1.0
-		if _, ok := ms.prioritisedDest[hex.EncodeToString(ent.DestinationHash)]; ok {
-			priority = 0.1
+		if key, ok := destIDFrom(ent.DestinationHash); ok {
+			if _, hit := ms.prioritisedDest[key]; hit {
+				priority = 0.1
+			}
 		}
 		ws = append(ws, weighted{
 			key:    key,

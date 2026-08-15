@@ -40,13 +40,15 @@ func StampWorkblock(material []byte, expandRounds int) ([]byte, error) {
 
 	out := make([]byte, 0, 256*expandRounds)
 	saltSrc := make([]byte, 0, len(material)+16)
+	nBuf := make([]byte, 0, 16)
 	for n := range expandRounds {
-		nBytes, err := msgpack.Marshal(n)
+		var err error
+		nBuf, err = msgpack.AppendMarshal(nBuf[:0], n)
 		if err != nil {
 			return nil, fmt.Errorf("lxmf: workblock msgpack: %w", err)
 		}
 		saltSrc = append(saltSrc[:0], material...)
-		saltSrc = append(saltSrc, nBytes...)
+		saltSrc = append(saltSrc, nBuf...)
 		saltSum := sha256.Sum256(saltSrc)
 		block, err := cryptography.DeriveKey(material, saltSum[:], nil, 256)
 		if err != nil {

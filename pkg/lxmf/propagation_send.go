@@ -2,6 +2,7 @@
 package lxmf
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,26 +28,29 @@ func (r *PropagationRegistry) AttemptOrder(tr *transport.Transport, preferred []
 		if reachable[i].Hops != reachable[j].Hops {
 			return reachable[i].Hops < reachable[j].Hops
 		}
-		return hex.EncodeToString(reachable[i].Hash) < hex.EncodeToString(reachable[j].Hash)
+		return bytes.Compare(reachable[i].Hash, reachable[j].Hash) < 0
 	})
 
 	out := make([]*PropagationNode, 0, len(reachable))
-	seen := make(map[string]struct{}, len(reachable))
+	seen := make(map[destID]struct{}, len(reachable))
 
 	appendNode := func(n *PropagationNode) {
 		if n == nil {
 			return
 		}
-		key := hex.EncodeToString(n.Hash)
+		id, ok := destIDFrom(n.Hash)
+		if !ok {
+			return
+		}
 		if skip != nil {
-			if _, ok := skip[key]; ok {
+			if _, hit := skip[hex.EncodeToString(n.Hash)]; hit {
 				return
 			}
 		}
-		if _, ok := seen[key]; ok {
+		if _, hit := seen[id]; hit {
 			return
 		}
-		seen[key] = struct{}{}
+		seen[id] = struct{}{}
 		copy := *n
 		copy.Hash = append([]byte(nil), n.Hash...)
 		out = append(out, &copy)

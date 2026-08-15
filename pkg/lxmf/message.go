@@ -647,30 +647,52 @@ var payloadBufPool = sync.Pool{
 	New: func() any { return new(bytes.Buffer) },
 }
 
+var payloadReaderPool = sync.Pool{
+	New: func() any { return bytes.NewReader(nil) },
+}
+
+const maxPooledPayloadBuf = 1 << 20
+
 func encodePayload(payload []any) ([]byte, error) {
 	buf := payloadBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	enc := msgpack.NewEncoder(buf)
+	enc := msgpack.GetEncoder()
+	enc.Reset(buf)
 	enc.UseCompactInts(true)
 	enc.UseCompactFloats(false)
 	enc.UseInternedStrings(false)
-	if err := enc.Encode(payload); err != nil {
-		payloadBufPool.Put(buf)
+	err := enc.Encode(payload)
+	msgpack.PutEncoder(enc)
+	if err != nil {
+		putPayloadBuf(buf)
 		return nil, err
 	}
 	out := make([]byte, buf.Len())
 	copy(out, buf.Bytes())
-	payloadBufPool.Put(buf)
+	putPayloadBuf(buf)
 	return out, nil
+}
+
+func putPayloadBuf(buf *bytes.Buffer) {
+	if buf.Cap() <= maxPooledPayloadBuf {
+		payloadBufPool.Put(buf)
+	}
 }
 
 // decodePayloadAndSplit decodes payload and preserves raw bytes for hashing (multi-field map order stability).
 func decodePayloadAndSplit(data []byte) ([]any, []byte, error) {
-	r := bytes.NewReader(data)
-	dec := msgpack.NewDecoder(r)
+	r := payloadReaderPool.Get().(*bytes.Reader)
+	r.Reset(data)
+	dec := msgpack.GetDecoder()
+	dec.Reset(r)
 	dec.UseLooseInterfaceDecoding(true)
 	mapCtx := &msgpackMapCtx{maxDepth: msgpackMapMaxDepth, maxPairs: msgpackMapMaxPairs}
 	dec.SetMapDecoder(mapCtx.decodeMap)
+	defer func() {
+		msgpack.PutDecoder(dec)
+		r.Reset(nil)
+		payloadReaderPool.Put(r)
+	}()
 
 	totalLen := int64(len(data))
 	arrLen, err := dec.DecodeArrayLen()

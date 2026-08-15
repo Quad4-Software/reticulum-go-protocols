@@ -2,8 +2,8 @@
 package lxmf
 
 import (
+	"bytes"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -28,13 +28,13 @@ type PropagationNode struct {
 // PropagationRegistry records propagation node announces on the transport.
 type PropagationRegistry struct {
 	mu    sync.RWMutex
-	nodes map[string]*PropagationNode
+	nodes map[destID]*PropagationNode
 }
 
 // NewPropagationRegistry returns an empty propagation node registry.
 func NewPropagationRegistry() *PropagationRegistry {
 	return &PropagationRegistry{
-		nodes: make(map[string]*PropagationNode),
+		nodes: make(map[destID]*PropagationNode),
 	}
 }
 
@@ -80,7 +80,10 @@ func (r *PropagationRegistry) ReceivedAnnounce(destHash []byte, identAny any, ap
 		return nil
 	}
 
-	key := hex.EncodeToString(destHash)
+	key, ok := destIDFrom(destHash)
+	if !ok {
+		return nil
+	}
 	node := &PropagationNode{
 		Hash:      append([]byte(nil), destHash...),
 		Name:      name,
@@ -131,7 +134,7 @@ func (r *PropagationRegistry) List() []*PropagationNode {
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
 		}
-		return hex.EncodeToString(out[i].Hash) < hex.EncodeToString(out[j].Hash)
+		return bytes.Compare(out[i].Hash, out[j].Hash) < 0
 	})
 	return out
 }
@@ -205,5 +208,5 @@ func (r *PropagationRegistry) reachable(tr *transport.Transport) []*PropagationN
 const pathPollInterval = 500 * time.Millisecond
 
 func bytesEqual(a, b []byte) bool {
-	return len(a) == len(b) && (len(a) == 0 || string(a) == string(b))
+	return bytes.Equal(a, b)
 }
