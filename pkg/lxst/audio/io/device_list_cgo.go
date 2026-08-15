@@ -83,8 +83,3 @@ func ListDevices() ([]DeviceInfo, error) {
 	}
 	return out, nil
 }
-
-// #nosec G115 -- audio parameters are bounded before C API calls
-func cInt(v int) C.int {
-	return C.int(v)
-}

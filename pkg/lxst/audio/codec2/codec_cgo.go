@@ -1,6 +1,5 @@
 //go:build cgo
 
-// #nosec G115
 // SPDX-License-Identifier: Apache-2.0
 package codec2
 
