@@ -112,8 +112,14 @@ func (pr *PacketReceipt) IsFailed() bool {
 }
 
 func (pr *PacketReceipt) ValidateProofPacket(proofPacket *Packet) bool {
-	if proofPacket.Link != nil {
-		return pr.ValidateLinkProof(proofPacket.Data, proofPacket.Link, proofPacket)
+	link := proofPacket.Link
+	if link == nil {
+		pr.mutex.RLock()
+		link = pr.link
+		pr.mutex.RUnlock()
+	}
+	if link != nil {
+		return pr.ValidateLinkProof(proofPacket.Data, link, proofPacket)
 	}
 	return pr.ValidateProof(proofPacket.Data, proofPacket)
 }

@@ -7,6 +7,11 @@ github.com/fxamacker/cbor/v2
 # github.com/godbus/dbus/v5 v5.2.2
 ## explicit; go 1.20
 github.com/godbus/dbus/v5
+# github.com/landlock-lsm/go-landlock v0.9.0
+## explicit; go 1.24.0
+github.com/landlock-lsm/go-landlock/landlock
+github.com/landlock-lsm/go-landlock/landlock/internal
+github.com/landlock-lsm/go-landlock/landlock/syscall
 # github.com/mdlayher/socket v0.6.1
 ## explicit; go 1.25.0
 github.com/mdlayher/socket
@@ -83,6 +88,9 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
+# kernel.org/pub/linux/libs/security/libcap/psx v1.2.77
+## explicit; go 1.11
+kernel.org/pub/linux/libs/security/libcap/psx
 # quad4/bzip2 v0.0.0 => github.com/Quad4-Software/bzip2 v0.0.0-20260704225916-ca8b2bb66059
 ## explicit; go 1.26.2
 quad4/bzip2/internal/enc
@@ -91,6 +99,9 @@ quad4/bzip2/pkg/bzip2
 ## explicit; go 1.26.2
 quad4/msgpack/v5/pkg/msgpack
 quad4/msgpack/v5/pkg/msgpack/msgpcode
+# quad4/pbt v0.0.0 => github.com/Quad4-Software/pbt v0.0.0-20260614183135-abe0cfc4e604
+## explicit; go 1.26.2
+quad4/pbt/pkg/pbt
 # quad4/reticulum-go v1.0.0 => github.com/Quad4-Software/Reticulum-Go v1.0.0
 ## explicit; go 1.26.5
 quad4/reticulum-go/internal/storage

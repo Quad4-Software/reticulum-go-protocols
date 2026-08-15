@@ -1,0 +1,205 @@
+// SPDX-License-Identifier: 0BSD
+package lxmf
+
+import (
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"os/exec"
+	"time"
+
+	"quad4/reticulum-go/pkg/common"
+	"quad4/reticulum-go/pkg/link"
+	"quad4/reticulum-go/pkg/packet"
+	"quad4/reticulum-go/pkg/resource"
+)
+
+// Receive implements inbound delivery for the lxmf.delivery destination.
+func (r *Router) Receive(pkt *packet.Packet, iface common.NetworkInterface) {
+	if pkt == nil || r.deliveryDest == nil {
+		return
+	}
+	if pkt.PacketType == packet.PacketTypeLinkReq {
+		r.deliveryDest.Receive(pkt, iface)
+		return
+	}
+
+	plaintext, err := r.decryptDelivery(pkt.Data)
+	if err != nil {
+		Warning("router delivery decrypt failed", "error", err)
+		return
+	}
+	_ = sendDeliveryProof(r.deliveryDest, pkt, iface)
+
+	method := MethodOpportunistic
+	lxmfData := plaintext
+	if pkt.DestinationType != packet.DestinationLink {
+		lxmfData = append(append([]byte(nil), r.deliveryDest.GetHash()...), plaintext...)
+	} else {
+		method = MethodDirect
+	}
+	r.handleDeliveryPayload(lxmfData, method, false, false)
+}
+
+func (r *Router) deliveryLinkEstablished(v any) {
+	lnk, ok := v.(*link.Link)
+	if !ok || lnk == nil {
+		return
+	}
+	_ = lnk.SetResourceStrategy(link.AcceptApp)
+	lnk.SetPacketCallback(func(data []byte, _ *packet.Packet) {
+		r.handleDeliveryPayload(data, MethodDirect, false, false)
+	})
+	lnk.SetResourceCallback(func(adv any) bool {
+		return r.deliveryResourceAdvertised(adv)
+	})
+	lnk.SetResourceConcludedCallback(func(res any) {
+		r.deliveryResourceConcluded(res)
+	})
+}
+
+func (r *Router) deliveryResourceAdvertised(adv any) bool {
+	var size int64
+	switch a := adv.(type) {
+	case *resource.ResourceAdvertisement:
+		if a != nil {
+			size = a.DataSize
+		}
+	default:
+	}
+	limit := int64(r.cfg.LXMF.DeliveryTransferMaxAcceptedSize * 1000)
+	if limit > 0 && size > limit {
+		return false
+	}
+	return true
+}
+
+func (r *Router) deliveryResourceConcluded(res any) {
+	data := extractResourceData(res)
+	if len(data) == 0 {
+		return
+	}
+	r.handleDeliveryPayload(data, MethodDirect, true, false)
+}
+
+func (r *Router) handleDeliveryPayload(lxmfData []byte, method byte, noStampEnforcement, allowDuplicate bool) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			Error("router delivery panic", "error", rec)
+		}
+	}()
+
+	if r.deliveryDest == nil {
+		return
+	}
+	if len(lxmfData) < 2*DestinationLength+SignatureLength {
+		return
+	}
+
+	localHash := r.deliveryDest.GetHash()
+	inner := lxmfData[DestinationLength:]
+	msg, err := UnpackFromBytes(localHash, inner, RecallSource)
+	if err != nil && msg == nil {
+		Warning("router delivery unpack failed", "error", err)
+		return
+	}
+	if msg == nil {
+		return
+	}
+
+	msg.Incoming = true
+	msg.Method = method
+
+	r.mu.RLock()
+	stampCost := r.inboundStampCost
+	enforce := r.enforceStamps
+	_, ignored := r.ignoredList[peerKey(msg.SourceHash)]
+	r.mu.RUnlock()
+
+	if ignored {
+		return
+	}
+
+	if stampCost != nil && *stampCost > 0 {
+		ok, err := msg.ValidateStamp(*stampCost, nil)
+		if err == nil {
+			msg.StampValid = ok
+		}
+		if !msg.StampValid && enforce && !noStampEnforcement {
+			Warning("dropping message with invalid stamp", "hash", hex.EncodeToString(msg.Hash))
+			return
+		}
+	}
+
+	if !allowDuplicate && r.hasMessage(msg.Hash) {
+		return
+	}
+
+	r.deliveredMu.Lock()
+	r.locallyDelivered[peerKey(msg.Hash)] = float64(time.Now().Unix())
+	r.deliveredMu.Unlock()
+
+	var savedPath string
+	if r.messagesDir != "" {
+		if err := os.MkdirAll(r.messagesDir, 0o700); err == nil {
+			path, err := WriteToDirectory(msg, r.messagesDir)
+			if err != nil {
+				Warning("write inbound message failed", "error", err)
+			} else {
+				savedPath = path
+			}
+		}
+	}
+
+	if r.onInbound != "" && savedPath != "" {
+		cmd := exec.Command(r.onInbound, savedPath) // #nosec G204 -- operator configured hook
+		_ = cmd.Run()
+	}
+
+	Info("router delivered message", "hash", hex.EncodeToString(msg.Hash), "method", method)
+}
+
+func (r *Router) decryptDelivery(ciphertext []byte) ([]byte, error) {
+	if r.deliveryDest == nil {
+		return nil, errors.New("lxmf: no delivery destination")
+	}
+	id := r.deliveryDest.GetIdentity()
+	if id == nil {
+		return nil, errors.New("no identity available for decryption")
+	}
+	ratchets := r.deliveryDest.GetRatchets()
+	if idRatchets := id.GetRatchets(); len(idRatchets) > 0 {
+		ratchets = append(ratchets, idRatchets...)
+	}
+	receiver := &common.RatchetIDReceiver{}
+	return id.Decrypt(ciphertext, ratchets, false, receiver)
+}
+
+func extractResourceData(res any) []byte {
+	switch v := res.(type) {
+	case []byte:
+		return v
+	case link.IncomingResource:
+		return v.Data
+	default:
+		return nil
+	}
+}
+
+func resourceAdvertisedSize(adv any) int64 {
+	switch a := adv.(type) {
+	case *resource.ResourceAdvertisement:
+		if a != nil {
+			return a.DataSize
+		}
+	}
+	return 0
+}
+
+func readResourceBytes(r io.Reader) ([]byte, error) {
+	if r == nil {
+		return nil, errors.New("lxmf: nil resource reader")
+	}
+	return io.ReadAll(r)
+}

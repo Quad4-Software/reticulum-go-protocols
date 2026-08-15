@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: 0BSD
+package lxmf
+
+import (
+	"path/filepath"
+	"testing"
+
+	"quad4/msgpack/v5/pkg/msgpack"
+	"quad4/reticulum-go/pkg/common"
+	"quad4/reticulum-go/pkg/transport"
+)
+
+func TestPeerSkipsOwnPropagationHash(t *testing.T) {
+	tr := transport.NewTransport(common.DefaultConfig())
+	if err := tr.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	id := mustNewIdentity(t)
+	home := t.TempDir()
+	router, err := NewRouter(id, tr, RouterOptions{
+		Config:      DefaultConfig(),
+		StoragePath: filepath.Join(home, "storage"),
+		MessagesDir: filepath.Join(home, "storage", "messages"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.EnablePropagation(); err != nil {
+		t.Fatal(err)
+	}
+	ownHash := router.PropagationDestination().GetHash()
+	router.peer(ownHash, 1, 100, 1000, 16, 4, 12, nil)
+
+	router.peersMu.RLock()
+	count := len(router.peers)
+	router.peersMu.RUnlock()
+	if count != 0 {
+		t.Fatalf("peers=%d want 0 for own propagation hash", count)
+	}
+}
+
+func TestHandlePropagationPacketIgnoresEmptyMessages(t *testing.T) {
+	tr := transport.NewTransport(common.DefaultConfig())
+	if err := tr.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	id := mustNewIdentity(t)
+	home := t.TempDir()
+	router, err := NewRouter(id, tr, RouterOptions{
+		Config:      DefaultConfig(),
+		StoragePath: filepath.Join(home, "storage"),
+		MessagesDir: filepath.Join(home, "storage", "messages"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.EnablePropagation(); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := msgpack.Marshal([]any{float64(0), []any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.handlePropagationPacket(payload, nil, nil)
+	if router.clientPropagationReceived != 0 {
+		t.Fatalf("clientPropagationReceived=%d want 0 for empty upload", router.clientPropagationReceived)
+	}
+}
+
+func TestThrottlePeerRecordsCooldown(t *testing.T) {
+	tr := transport.NewTransport(common.DefaultConfig())
+	if err := tr.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	id := mustNewIdentity(t)
+	home := t.TempDir()
+	router, err := NewRouter(id, tr, RouterOptions{
+		Config:      DefaultConfig(),
+		StoragePath: filepath.Join(home, "storage"),
+		MessagesDir: filepath.Join(home, "storage", "messages"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.EnablePropagation(); err != nil {
+		t.Fatal(err)
+	}
+
+	hash := bytesRepeat(0xab, DestinationLength)
+	router.throttlePeer(hash)
+	if !router.throttled(peerKey(hash)) {
+		t.Fatal("expected peer to be throttled")
+	}
+}

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"time"
 
+	"quad4/msgpack/v5/pkg/msgpack"
 	"quad4/reticulum-go/pkg/destination"
 	"quad4/reticulum-go/pkg/identity"
 	"quad4/reticulum-go/pkg/link"
+	"quad4/reticulum-go/pkg/packet"
 	"quad4/reticulum-go/pkg/resource"
 )
 
@@ -103,6 +105,7 @@ func (m *Messenger) establishPropagationLink(propNodeHash []byte) (*link.Link, e
 		m.propLinkMu.Unlock()
 		Verbose("propagation link closed", "node", nodeHex)
 	})
+	lnk.SetPacketCallback(m.onPropagationSignalling)
 
 	Info("propagation sending link request", "node", nodeHex)
 	if err := lnk.Establish(); err != nil {
@@ -148,6 +151,35 @@ func (m *Messenger) establishPropagationLink(propNodeHash []byte) (*link.Link, e
 	m.propLinkNode = append([]byte(nil), propNodeHash...)
 	m.propLinkMu.Unlock()
 	return lnk, nil
+}
+
+func (m *Messenger) onPropagationSignalling(data []byte, _ *packet.Packet) {
+	var payload []any
+	if err := msgpack.Unmarshal(data, &payload); err != nil || len(payload) < 1 {
+		return
+	}
+	code, ok := signalByte(payload[0])
+	if !ok || code != PeerErrorInvalidStamp {
+		return
+	}
+	Warning("propagation upload rejected: invalid stamp")
+	m.clearPropagationLink()
+}
+
+func signalByte(v any) (byte, bool) {
+	switch x := v.(type) {
+	case byte:
+		return x, true
+	case int8:
+		return byte(x), true
+	case int:
+		if x < 0 || x > 255 {
+			return 0, false
+		}
+		return byte(x), true
+	default:
+		return 0, false
+	}
 }
 
 func (m *Messenger) sendPropagationPayload(lnk *link.Link, payload []byte) error {

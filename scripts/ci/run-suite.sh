@@ -36,12 +36,12 @@ test)
 	;;
 test-race)
 	"$GOCMD" test -race -short -count=1 -timeout 20m \
-		./internal/leaktest/... ./pkg/lxmf/... ./pkg/mf/... ./pkg/rrc/...
+		./internal/leaktest/... ./internal/gorrcd/... ./pkg/lxmf/... ./pkg/mf/... ./pkg/rrc/... ./pkg/lxst/...
 	;;
 live)
 	"$GOCMD" test -count=1 -timeout 25m \
 		-run 'Test(E2E_|HubClientLoopback|Messenger_TwoWay)' \
-		./pkg/mf/... ./pkg/lxmf/... ./pkg/rrc/...
+		./pkg/mf/... ./pkg/lxmf/... ./pkg/rrc/... ./internal/gorrcd/...
 	;;
 examples)
 	# examples/*.go use //go:build ignore; single-file go build still type-checks them.
@@ -56,13 +56,25 @@ examples)
 		"$GOCMD" build -o /dev/null "$f"
 	done
 	;;
+	build)
+	sh "$ROOT/scripts/ci/build-gorrcd.sh" "$("$GOCMD" env GOOS)" "$("$GOCMD" env GOARCH)" bin
+	"$ROOT/bin/gorrcd-$("$GOCMD" env GOOS)-$("$GOCMD" env GOARCH)" --version
+	sh "$ROOT/scripts/ci/build-golxmd.sh" "$("$GOCMD" env GOOS)" "$("$GOCMD" env GOARCH)" bin
+	golxmd_bin="$ROOT/bin/golxmd-$("$GOCMD" env GOOS)-$("$GOCMD" env GOARCH)"
+	"$golxmd_bin" --version
+	GOLXMD_HOME="$(mktemp -d)" "$golxmd_bin" --self-check
+	;;
 interop-lxmf)
 	sh "$ROOT/scripts/ci/clone-refs.sh"
 	task test:lxmf:interop
+	task test:lxmf:golxmd
 	;;
 interop-rrc)
 	sh "$ROOT/scripts/ci/clone-refs.sh"
 	task test:rrc:interop
+	;;
+interop-lxst)
+	sh "$ROOT/scripts/ci/run-lxst-interop.sh"
 	;;
 interop)
 	sh "$ROOT/scripts/ci/clone-refs.sh"

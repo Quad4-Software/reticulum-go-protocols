@@ -1,12 +1,13 @@
 # reticulum-go-protocols
 
-Go implementations of application protocols that run on [Reticulum-Go](https://github.com/Quad4-Software/Reticulum-Go). All three packages share one transport instance.
+Go implementations of application protocols that run on [Reticulum-Go](https://github.com/Quad4-Software/Reticulum-Go). All packages share one transport instance. This is a monorepo.
 
 | Package | What it is |
 | --- | --- |
 | [`pkg/mf`](pkg/mf) | Compact native format: 16-byte sender hash plus UTF-8 text |
 | [`pkg/lxmf`](pkg/lxmf) | [LXMF](https://github.com/markqvist/LXMF) 1.1.0 pack, stamp, paper URI, and delivery messenger |
 | [`pkg/rrc`](pkg/rrc) | [RRC](https://rrc.kc1awv.net/) protocol version 1 (spec 0.1.3) hub and client |
+| [`pkg/lxst`](pkg/lxst) | [LXST](https://pypi.org/project/lxst/) 0.5.1 telephony: encrypted voice calls over Reticulum links |
 
 ## Requirements
 
@@ -132,11 +133,66 @@ if err := client.Join("#lobby"); err != nil {
 
 Wait for `OnJoined` before `SendMsg`. Tests: `task test:rrc` or `go test ./pkg/rrc/...`.
 
-Python codec checks use [rrcd](https://github.com/kc1awv/rrcd) via `uv`. Clone it to `RRC-ref`, then `task test:rrc:interop`. Live UDP cases (`TestInterop_Live_PythonClientGoHub`, `TestInterop_Live_GoClientPythonHub`) are skipped under `-short` and are required when `CI=1`.
+Python codec checks use [rrcd](https://github.com/kc1awv/rrcd) via `uv`. Clone it to `RRC-ref`, then `task test:rrc:interop`. Live UDP cases (`TestInterop_Live_PythonClientGoHub`, `TestInterop_Live_GoClientPythonHub`, `TestInterop_Live_PythonClientGoDaemon`) are skipped under `-short` and are required when `CI_REQUIRE_INTEROP=1`.
+
+The interop package also includes a Python RRC client (`pkg/rrc/interoptest/client.py`) used to drive gorrcd: HELLO/WELCOME, JOIN/MSG, `/list` `/who`, unknown slash commands, PING/PONG, and ACTION.
 
 Go-to-Go hub and client mesh tests: `task test:live`.
 
-Slash commands, IRC-style room modes, and RNS Resource blob transfer are rrcd hub extras. This package implements the envelope and hub policy for type 50, not the blob transfer itself.
+`pkg/rrc.Hub` is the wire protocol core. Optional `HubPolicy` is used by `cmd/gorrcd` for slash commands, IRC-style room modes, trusted/banned lists, MOTD, hub ping, and RNS Resource blob transfer.
+
+## pkg/lxst
+
+LXST 0.5.1 telephony over Reticulum links. Wire format uses msgpack maps for signalling (`{0: [...]}`) and audio frames (`{1: [codec, payload]}`). Destination is `lxst.telephony`. Opus is the default codec, with Codec2 for low bandwidth.
+
+```go
+caller := call.NewCall(tr, call.Config{
+	Identity: id,
+	UseAudio: false,
+})
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+if err := caller.Dial(ctx, remoteIdentity); err != nil {
+	log.Fatal(err)
+}
+```
+
+The call stack is split into `pkg/lxst/proto` (wire codec), `pkg/lxst/call` (state machine and signalling), `pkg/lxst/media` (jitter buffer and adaptive bitrate), and `pkg/lxst/audio` (Opus, Codec2, device I/O). `pkg/lxst/rnsnode` attaches to a shared Reticulum instance, a UDP hop, or a config directory.
+
+CLIs:
+
+- `cmd/rnphone` interactive phone (phonebook, ringtone, announce, history)
+- `cmd/rgesp-dial` scriptable dialer for tests and automation
+
+Build with CGO for real audio:
+
+```bash
+task rnphone
+./bin/rnphone-$(go env GOOS)-$(go env GOARCH)
+```
+
+Without CGO, `pkg/lxst` still compiles: codecs use stubs so unit tests and the wire codec run in CI without native libraries.
+
+C ABI for the wire codec only: `task build-liblxst` builds `bin/liblxst.so` and `include/lxst.h`. Python, C, and C++ bindings live under `bindings/` (`task test-codec`).
+
+Python round-trips need `pip install lxst==0.5.1`. Run them with `task test:lxst:interop`. Live mesh call tests (`TestGoGo*`, `TestE2E_*`, `TestAcceptance_*`) are skipped under `-short`.
+
+Go examples: `task example:lxst` (wire codec), `task example:lxst:call` (minimal two-node call).
+
+## cmd/gorrcd
+
+Go RRC hub daemon with operator feature parity against [rrcd](https://github.com/kc1awv/rrcd). State lives in `GORRCD_HOME` or `~/.gorrcd/` (`gorrcd.toml`, `hub_identity`, `rooms.toml`) so it does not collide with Python `~/.rrcd`. First run writes defaults and exits 0.
+
+```bash
+task gorrcd
+./bin/gorrcd-$(go env GOOS)-$(go env GOARCH)
+```
+
+Attach to a running Reticulum shared instance when available, otherwise start AutoInterface. For loopback tests, `--udp-listen` and `--udp-forward` bind a UDP pair and skip AutoInterface. `--ready-file` writes the hub destination hash when the daemon is up.
+
+Trusted identities may use `/stats`, `/reload`, and `/kline`. Room founders and ops may use `/kick`, `/topic`, `/mode`, `/op`, `/deop`, `/voice`, `/devoice`, `/ban`, and `/invite`. Anyone may `/list` and `/who`.
+
+Tagged `v*` pushes and Sunday preview snapshots publish cross-compiled `gorrcd` binaries (Linux including 32-bit, armv6, riscv64, ppc64le, Darwin Intel and Apple silicon, Windows, FreeBSD, OpenBSD including ppc64 and riscv64, and NetBSD). CI compiles the same matrix on every push and runs `--version` under qemu-user for linux/386, arm, riscv64, and ppc64le.
 
 ## Tests
 
@@ -156,6 +212,9 @@ task check
 | Gosec | `task scan` |
 | LXMF tests | `task test:lxmf` |
 | RRC tests | `task test:rrc` |
+| LXST tests | `task test:lxst` |
+| LXST Python interop | `task test:lxst:interop` |
+| Codec bindings | `task test-codec` |
 | MF two-way messenger | `task test:messenger` |
 | Benchmarks | `task bench` |
 | Live Go mesh | `task test:live` |

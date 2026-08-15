@@ -4,8 +4,11 @@ go 1.26.5
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.2
+	github.com/landlock-lsm/go-landlock v0.9.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	quad4/msgpack/v5 v5.8.2
+	quad4/pbt v0.0.0
 	quad4/reticulum-go v1.0.0
 )
 
@@ -22,8 +25,8 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	quad4/bzip2 v0.0.0 // indirect
 	quad4/tagparser v0.0.0 // indirect
 )

@@ -17,6 +17,8 @@ type session struct {
 	closed   bool
 	onMsg    MessageHandler
 	onClose  func()
+	onBad    func()
+	onBytes  func(n int)
 	autoPong bool
 }
 
@@ -84,8 +86,18 @@ func (s *session) sendType(msgType uint64, room string, body any, nick string) e
 }
 
 func (s *session) handleInbound(data []byte) {
+	defer recoverDiscard()
+	if s.onBytes != nil {
+		s.onBytes(len(data))
+	}
 	env, err := UnmarshalEnvelope(data)
 	if err != nil {
+		s.mu.Lock()
+		bad := s.onBad
+		s.mu.Unlock()
+		if bad != nil {
+			bad()
+		}
 		return
 	}
 	if s.autoPong && env.Type == TypePing {

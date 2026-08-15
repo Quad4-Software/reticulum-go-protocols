@@ -137,12 +137,13 @@ func runInterop(req map[string]any) (interopResponse, error) {
 	cmd := exec.Command("uv", "run", "python", "harness.py")
 	cmd.Dir = interopDir
 	cmd.Stdin = bytes.NewReader(payload)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return zero, fmt.Errorf("uv run harness: %w: %s", err, string(ee.Stderr))
+		var resp interopResponse
+		if jsonErr := json.Unmarshal(bytes.TrimSpace(out), &resp); jsonErr == nil && (resp.Error != "" || resp.Trace != "") {
+			return resp, fmt.Errorf("%s", resp.Error)
 		}
-		return zero, fmt.Errorf("uv run harness: %w", err)
+		return zero, fmt.Errorf("uv run harness: %w: %s", err, string(out))
 	}
 	var resp interopResponse
 	if err := json.Unmarshal(bytes.TrimSpace(out), &resp); err != nil {

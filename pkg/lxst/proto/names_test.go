@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: Apache-2.0
+package proto_test
+
+import (
+	"testing"
+
+	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+)
+
+func TestModeFromName(t *testing.T) {
+	cases := map[string]int{
+		"full": proto.ModeFullDuplex,
+		"fdx":  proto.ModeFullDuplex,
+		"half": proto.ModeHalfDuplex,
+		"hdx":  proto.ModeHalfDuplex,
+		"ptt":  proto.ModeHalfDuplex,
+	}
+	for name, want := range cases {
+		if got := proto.ModeFromName(name); got != want {
+			t.Fatalf("ModeFromName(%q)=%d want %d", name, got, want)
+		}
+	}
+	if got := proto.ModeFromName("bogus"); got != proto.DefaultMode {
+		t.Fatalf("default mode %d", got)
+	}
+}
+
+func TestModeName(t *testing.T) {
+	if proto.ModeName(proto.ModeFullDuplex) != "full" {
+		t.Fatal("full name")
+	}
+	if proto.ModeName(proto.ModeHalfDuplex) != "half" {
+		t.Fatal("half name")
+	}
+}

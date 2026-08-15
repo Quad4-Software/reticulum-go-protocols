@@ -37,6 +37,22 @@ type interopResponse struct {
 	HubHash     string         `json:"hub_hash,omitempty"`
 	PublicKey   string         `json:"public_key,omitempty"`
 	ReadyPath   string         `json:"ready_path,omitempty"`
+	HubName     string         `json:"hub_name,omitempty"`
+	Joined      bool           `json:"joined,omitempty"`
+	MsgEcho     bool           `json:"msg_echo,omitempty"`
+	Pong        bool           `json:"pong,omitempty"`
+	Parted      bool           `json:"parted,omitempty"`
+	NoticeOK    bool           `json:"notice_ok,omitempty"`
+	ActionOK    bool           `json:"action_ok,omitempty"`
+	Constants   map[string]any `json:"constants,omitempty"`
+	Normalized  string         `json:"normalized,omitempty"`
+	RoundtripOK bool           `json:"roundtrip_ok,omitempty"`
+	Packed2     string         `json:"packed2,omitempty"`
+	Notices     []string       `json:"notices,omitempty"`
+	Errors      []string       `json:"errors,omitempty"`
+	Events      []any          `json:"events,omitempty"`
+	WelcomeCaps map[string]any `json:"welcome_caps,omitempty"`
+	WelcomeLim  map[string]any `json:"welcome_limits,omitempty"`
 }
 
 var (

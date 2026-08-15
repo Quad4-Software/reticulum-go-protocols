@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,38 +85,62 @@ func NewMessage(destinationHash, sourceHash, title, content []byte, fields map[b
 }
 
 func (m *LXMessage) SetTitle(title string) {
+	if m == nil {
+		return
+	}
 	m.Title = []byte(title)
 }
 
 func (m *LXMessage) SetContent(content string) {
+	if m == nil {
+		return
+	}
 	m.Content = []byte(content)
 }
 
 func (m *LXMessage) TitleString() string {
+	if m == nil {
+		return ""
+	}
 	return string(m.Title)
 }
 
 func (m *LXMessage) ContentString() string {
+	if m == nil {
+		return ""
+	}
 	return string(m.Content)
 }
 
 // FormatHash hex-encodes Hash.
 func (m *LXMessage) FormatHash() string {
+	if m == nil {
+		return "<nil>"
+	}
 	return hex.EncodeToString(m.Hash)
 }
 
 // MessageID is an alias for Hash (stamps and tickets).
 func (m *LXMessage) MessageID() []byte {
+	if m == nil {
+		return nil
+	}
 	return m.Hash
 }
 
 // PackedSize returns len(Packed), or 0 if not packed.
 func (m *LXMessage) PackedSize() int {
+	if m == nil {
+		return 0
+	}
 	return len(m.Packed)
 }
 
 // ContentSize returns packed content length after Pack (upstream len(payload)-timestamp-struct overhead).
 func (m *LXMessage) ContentSize() (int, error) {
+	if m == nil {
+		return 0, errors.New("lxmf: nil message")
+	}
 	if len(m.Packed) == 0 {
 		return 0, errors.New("lxmf: message has not been packed")
 	}
@@ -123,6 +149,82 @@ func (m *LXMessage) ContentSize() (int, error) {
 		return 0, nil
 	}
 	return payloadLen - TimestampSize - StructOverhead, nil
+}
+
+// GetField returns the raw field value and whether it exists.
+func (m *LXMessage) GetField(key byte) (any, bool) {
+	if m == nil || m.Fields == nil {
+		return nil, false
+	}
+	val, ok := m.Fields[key]
+	return val, ok
+}
+
+// GetFieldString returns the field value as a string. Returns empty string if missing or not a string/bytes.
+func (m *LXMessage) GetFieldString(key byte) string {
+	val, ok := m.GetField(key)
+	if !ok {
+		return ""
+	}
+	switch x := val.(type) {
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	default:
+		return ""
+	}
+}
+
+// GetFieldBytes returns the field value as a byte slice. Returns nil if missing or not a string/bytes.
+func (m *LXMessage) GetFieldBytes(key byte) []byte {
+	val, ok := m.GetField(key)
+	if !ok {
+		return nil
+	}
+	switch x := val.(type) {
+	case []byte:
+		return append([]byte(nil), x...)
+	case string:
+		return []byte(x)
+	default:
+		return nil
+	}
+}
+
+// GetFieldInt returns the field value as an int64. Returns 0 if missing or not an integer.
+func (m *LXMessage) GetFieldInt(key byte) int64 {
+	val, ok := m.GetField(key)
+	if !ok {
+		return 0
+	}
+	if v, ok := asInt64(val); ok {
+		return v
+	}
+	return 0
+}
+
+// GetFieldBool returns the field value as a bool. Returns false if missing or not a bool.
+func (m *LXMessage) GetFieldBool(key byte) bool {
+	val, ok := m.GetField(key)
+	if !ok {
+		return false
+	}
+	if b, ok := val.(bool); ok {
+		return b
+	}
+	return false
+}
+
+// SetField sets a field value, initializing the Fields map if it was nil.
+func (m *LXMessage) SetField(key byte, val any) {
+	if m == nil {
+		return
+	}
+	if m.Fields == nil {
+		m.Fields = make(map[byte]any)
+	}
+	m.Fields[key] = val
 }
 
 // MaxContentForMethod returns the content cap for method and destination type (ok false if no single-packet limit).
@@ -148,6 +250,9 @@ func MaxContentForMethod(method byte, destinationType byte) (int, bool) {
 
 // ChooseDeliveryMethod selects method and representation from packed size; MethodUnknown becomes MethodDirect.
 func (m *LXMessage) ChooseDeliveryMethod(desiredMethod, destinationType byte) (method, representation byte, err error) {
+	if m == nil {
+		return 0, 0, errors.New("lxmf: nil message")
+	}
 	if len(m.Packed) == 0 {
 		return 0, 0, errors.New("lxmf: message has not been packed")
 	}
@@ -208,6 +313,9 @@ func DetermineTransportEncryption(method, destinationType byte) (encrypted bool,
 
 // ValidateStamp checks PoW stamp or ticket-derived stamp; sets StampValid and StampValue on success.
 func (m *LXMessage) ValidateStamp(targetCost int, tickets [][]byte) (bool, error) {
+	if m == nil {
+		return false, errors.New("lxmf: nil message")
+	}
 	if len(m.Hash) == 0 {
 		return false, errors.New("lxmf: message has no hash; pack or unpack it first")
 	}
@@ -329,6 +437,9 @@ func (m *LXMessage) Pack(signer Signer) ([]byte, error) {
 
 // EncryptedPayload returns the ciphertext slice after the destination hash (for opportunistic send).
 func (m *LXMessage) EncryptedPayload() ([]byte, error) {
+	if m == nil {
+		return nil, errors.New("lxmf: nil message")
+	}
 	if m.Packed == nil {
 		return nil, errors.New("lxmf: message has not been packed")
 	}
@@ -338,6 +449,9 @@ func (m *LXMessage) EncryptedPayload() ([]byte, error) {
 // PackPropagated builds propagation_packed for delivery via a propagation node.
 // recipient must be an outbound lxmf.delivery destination for the message recipient.
 func (m *LXMessage) PackPropagated(recipient *destination.Destination, pnStampCost int) error {
+	if m == nil {
+		return errors.New("lxmf: nil message")
+	}
 	if recipient == nil {
 		return errors.New("lxmf: nil recipient destination")
 	}
@@ -657,7 +771,7 @@ func (c *msgpackMapCtx) decodeMap(d *msgpack.Decoder) (any, error) {
 
 func copyFields(in map[byte]any) map[byte]any {
 	if in == nil {
-		return nil
+		return make(map[byte]any)
 	}
 	out := make(map[byte]any, len(in))
 	maps.Copy(out, in)
@@ -679,21 +793,22 @@ func asBytes(v any) ([]byte, error) {
 
 func asFields(v any) (map[byte]any, error) {
 	if v == nil {
-		return nil, nil
+		return make(map[byte]any), nil
 	}
 	m, ok := v.(map[any]any)
 	if !ok {
 		if mm, ok2 := v.(map[string]any); ok2 {
 			out := make(map[byte]any, len(mm))
 			for k, val := range mm {
-				if len(k) != 1 {
-					return nil, fmt.Errorf("%w: field key must encode as single byte, got %q", ErrInvalidPayload, k)
+				key, err := fieldKeyFromString(k)
+				if err != nil {
+					return nil, err
 				}
 				normalized, err := normalizeFieldValue(val)
 				if err != nil {
 					return nil, err
 				}
-				out[k[0]] = normalized
+				out[key] = normalized
 			}
 			return out, nil
 		}
@@ -717,6 +832,8 @@ func asFields(v any) (map[byte]any, error) {
 func normalizeFieldValue(v any) (any, error) {
 	switch x := v.(type) {
 	case map[any]any:
+		return asFields(x)
+	case map[string]any:
 		return asFields(x)
 	case map[byte]any:
 		out := make(map[byte]any, len(x))
@@ -782,7 +899,232 @@ func asByteKey(v any) (byte, error) {
 			return 0, fmt.Errorf("%w: field key out of range: %d", ErrInvalidPayload, x)
 		}
 		return byte(x), nil
+	case string:
+		return fieldKeyFromString(x)
 	default:
 		return 0, fmt.Errorf("%w: field key has unexpected type %T", ErrInvalidPayload, v)
 	}
+}
+
+func fieldKeyFromString(s string) (byte, error) {
+	if len(s) == 1 {
+		return s[0], nil
+	}
+	if len(s) >= 3 && (s[0:2] == "0x" || s[0:2] == "0X") {
+		n, err := parseHexByte(s[2:])
+		if err != nil {
+			return 0, fmt.Errorf("%w: field key %q: %v", ErrInvalidPayload, s, err)
+		}
+		return n, nil
+	}
+	return 0, fmt.Errorf("%w: field key must encode as single byte, got %q", ErrInvalidPayload, s)
+}
+
+func parseHexByte(s string) (byte, error) {
+	if len(s) == 0 {
+		return 0, fmt.Errorf("empty hex")
+	}
+	var n byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		var d byte
+		switch {
+		case c >= '0' && c <= '9':
+			d = c - '0'
+		case c >= 'a' && c <= 'f':
+			d = c - 'a' + 10
+		case c >= 'A' && c <= 'F':
+			d = c - 'A' + 10
+		default:
+			return 0, fmt.Errorf("invalid hex digit")
+		}
+		n = (n << 4) | d
+	}
+	return n, nil
+}
+
+// StateString returns a human-readable string for the message state.
+func StateString(state byte) string {
+	switch state {
+	case StateGenerating:
+		return "Generating"
+	case StateOutbound:
+		return "Outbound"
+	case StateSending:
+		return "Sending"
+	case StateSent:
+		return "Sent"
+	case StateDelivered:
+		return "Delivered"
+	case StateRejected:
+		return "Rejected"
+	case StateCancelled:
+		return "Cancelled"
+	case StateFailed:
+		return "Failed"
+	default:
+		return fmt.Sprintf("Unknown(0x%02X)", state)
+	}
+}
+
+// MethodString returns a human-readable string for the delivery method.
+func MethodString(method byte) string {
+	switch method {
+	case MethodUnknown:
+		return "Unknown"
+	case MethodOpportunistic:
+		return "Opportunistic"
+	case MethodDirect:
+		return "Direct"
+	case MethodPropagated:
+		return "Propagated"
+	case MethodPaper:
+		return "Paper"
+	default:
+		return fmt.Sprintf("Unknown(0x%02X)", method)
+	}
+}
+
+// RepresentationString returns a human-readable string for the representation.
+func RepresentationString(rep byte) string {
+	switch rep {
+	case RepresentationUnknown:
+		return "Unknown"
+	case RepresentationPacket:
+		return "Packet"
+	case RepresentationResource:
+		return "Resource"
+	default:
+		return fmt.Sprintf("Unknown(0x%02X)", rep)
+	}
+}
+
+// FieldName returns a human-readable name for a payload field key.
+func FieldName(key byte) string {
+	switch key {
+	case FieldEmbeddedLXMs:
+		return "EmbeddedLXMs"
+	case FieldTelemetry:
+		return "Telemetry"
+	case FieldTelemetryStream:
+		return "TelemetryStream"
+	case FieldIconAppearance:
+		return "IconAppearance"
+	case FieldFileAttachments:
+		return "FileAttachments"
+	case FieldImage:
+		return "Image"
+	case FieldAudio:
+		return "Audio"
+	case FieldThread:
+		return "Thread"
+	case FieldCommands:
+		return "Commands"
+	case FieldResults:
+		return "Results"
+	case FieldGroup:
+		return "Group"
+	case FieldTicket:
+		return "Ticket"
+	case FieldEvent:
+		return "Event"
+	case FieldRNRRefs:
+		return "RNRRefs"
+	case FieldRenderer:
+		return "Renderer"
+	case FieldReplyTo:
+		return "ReplyTo"
+	case FieldReplyQuote:
+		return "ReplyQuote"
+	case FieldReaction:
+		return "Reaction"
+	case FieldComment:
+		return "Comment"
+	case FieldContinuation:
+		return "Continuation"
+	case FieldCustomType:
+		return "CustomType"
+	case FieldCustomData:
+		return "CustomData"
+	case FieldCustomMeta:
+		return "CustomMeta"
+	case FieldNonSpecific:
+		return "NonSpecific"
+	case FieldDebug:
+		return "Debug"
+	default:
+		return fmt.Sprintf("Custom(0x%02X)", key)
+	}
+}
+
+// Diagnostics returns a multi-line detailed diagnostic report of the message.
+func (m *LXMessage) Diagnostics() string {
+	if m == nil {
+		return "LXMessage: <nil>"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("LXMF Message Diagnostics:\n")
+	fmt.Fprintf(&sb, "  Message ID (Hash):  %s\n", m.FormatHash())
+	fmt.Fprintf(&sb, "  State:              %s\n", StateString(m.State))
+	fmt.Fprintf(&sb, "  Delivery Method:    %s\n", MethodString(m.Method))
+	fmt.Fprintf(&sb, "  Representation:     %s\n", RepresentationString(m.Representation))
+	fmt.Fprintf(&sb, "  Destination Hash:   %s\n", hex.EncodeToString(m.DestinationHash))
+	fmt.Fprintf(&sb, "  Source Hash:        %s\n", hex.EncodeToString(m.SourceHash))
+
+	if m.Timestamp > 0 {
+		sec := int64(m.Timestamp)
+		nsec := int64((m.Timestamp - float64(sec)) * 1e9)
+		t := time.Unix(sec, nsec).UTC()
+		fmt.Fprintf(&sb, "  Timestamp:          %.6f (%s)\n", m.Timestamp, t.Format(time.RFC3339Nano))
+	} else {
+		sb.WriteString("  Timestamp:          0 (Not set)\n")
+	}
+
+	fmt.Fprintf(&sb, "  Title:              %q\n", m.TitleString())
+	fmt.Fprintf(&sb, "  Content Length:     %d bytes\n", len(m.Content))
+
+	if len(m.Fields) > 0 {
+		sb.WriteString("  Fields:\n")
+		// Sort keys for deterministic output
+		keys := make([]byte, 0, len(m.Fields))
+		for k := range m.Fields {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+
+		for _, k := range keys {
+			val := m.Fields[k]
+			fmt.Fprintf(&sb, "    - %-16s (0x%02X): %+v\n", FieldName(k), k, val)
+		}
+	} else {
+		sb.WriteString("  Fields:             None\n")
+	}
+
+	if len(m.Stamp) > 0 {
+		fmt.Fprintf(&sb, "  Stamp:              %s (Value: %d, Valid: %t)\n", hex.EncodeToString(m.Stamp), m.StampValue, m.StampValid)
+	} else {
+		sb.WriteString("  Stamp:              None\n")
+	}
+
+	if m.SignatureValidated {
+		sb.WriteString("  Signature:          Validated\n")
+	} else {
+		reason := "Unknown"
+		switch m.UnverifiedReason {
+		case UnverifiedSourceUnknown:
+			reason = "Source identity unknown"
+		case UnverifiedSignatureInvalid:
+			reason = "Signature invalid"
+		}
+		fmt.Fprintf(&sb, "  Signature:          Unverified (%s)\n", reason)
+	}
+
+	if len(m.Packed) > 0 {
+		fmt.Fprintf(&sb, "  Packed Size:        %d bytes\n", len(m.Packed))
+	} else {
+		sb.WriteString("  Packed Size:        Not packed\n")
+	}
+
+	return sb.String()
 }

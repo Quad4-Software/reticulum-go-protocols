@@ -1,5 +1,23 @@
 # Build artifacts
 bin/
+bindings/java/lib/
+bindings/java/out/
+bindings/rust/target/
+bindings/cpp/build/
+
+# C and Rust example compiled binaries
+bindings/c/examples/hub-client/hub-client
+bindings/c/examples/lxmf-interop/lxmf-interop
+bindings/c/examples/lxmf-smoke/lxmf-smoke
+bindings/c/examples/lxst-smoke/lxst-smoke
+bindings/c/examples/mf-smoke/mf-smoke
+bindings/c/examples/smoke/rrc-smoke
+bindings/rust/examples/smoke/smoke-bin
+bindings/rust/examples/hub-client/hub-client
+
+# Python cache and byte-compiled files
+**/__pycache__/
+*.pyc
 
 # Test coverage reports
 coverage.out
@@ -25,6 +43,7 @@ Thumbs.db
 # Swap and test binaries
 *.swp
 *.test
+/gorrcd
 
 # Format diff files
 fmt.diff
@@ -34,6 +53,22 @@ LXMF-ref/
 
 # Upstream rrcd reference clone for RRC interop tests
 RRC-ref/
+
+# LXST Python interop venv
+.venv-lxst/
+
+# LXST native audio build artifacts
+third_party/opus/build/
+third_party/opus/install/
+third_party/opus/lib/
+third_party/opus/include/
+third_party/opus-src/
+third_party/codec2/build/
+third_party/codec2/install/
+third_party/codec2/lib/
+third_party/codec2/include/
+third_party/codec2-src/
+third_party/miniaudio-src/
 
 # Python interop test virtualenv
 pkg/lxmf/interoptest/.venv/

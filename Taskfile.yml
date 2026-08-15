@@ -63,14 +63,44 @@ tasks:
       - '{{.GOCMD}} test -race -v ./...'
 
   test-race:packages:
-    desc: Race detector for lxmf, mf, rrc, and leaktest (uses -short; skips interop and heavy tests)
+    desc: Race detector for lxmf, mf, rrc, lxst, and leaktest (uses -short; skips interop and heavy tests)
     cmds:
-      - '{{.GOCMD}} test -race -short -count=1 -timeout 15m ./internal/leaktest/... ./pkg/lxmf/... ./pkg/mf/... ./pkg/rrc/...'
+      - '{{.GOCMD}} test -race -short -count=1 -timeout 15m ./internal/leaktest/... ./internal/gorrcd/... ./pkg/lxmf/... ./pkg/mf/... ./pkg/rrc/... ./pkg/lxst/...'
+
+  test:gorrcd:
+    desc: gorrcd unit tests
+    cmds:
+      - '{{.GOCMD}} test -short -v -count=1 ./internal/gorrcd/... ./cmd/gorrcd/...'
+
+  test:gorrcd:short:
+    desc: gorrcd smoke, unit, property, oracle, mutation, acceptance, crossref, adversarial, leak, race (skips live mesh)
+    cmds:
+      - "{{.GOCMD}} test -short -v -count=1 -run='Test(Smoke|Unit|Property|Oracle|Mutation|Acceptance|BlackBox|CrossRef|Adversarial|Leak|Race)|TestParse|TestConfig|TestRoom|TestFirst|TestTrust|TestSplit|TestMode|TestUnknown|TestUDP|TestSetFlag' ./internal/gorrcd/..."
+
+  test:gorrcd:e2e:
+    desc: gorrcd e2e and acceptance live mesh tests
+    cmds:
+      - "{{.GOCMD}} test -v -count=1 -timeout 10m -run='Test(E2E|Acceptance_5)' ./internal/gorrcd/..."
+
+  test:gorrcd:race:
+    desc: gorrcd race detector (short, no live mesh)
+    cmds:
+      - '{{.GOCMD}} test -race -short -count=1 -timeout 10m ./internal/gorrcd/...'
+
+  bench:gorrcd:
+    desc: gorrcd microbenchmarks
+    cmds:
+      - "{{.GOCMD}} test -bench=. -benchmem -count=3 -run=^$$ ./internal/gorrcd/..."
+
+  test:gorrcd:fuzz:
+    desc: gorrcd fuzz targets only (FUZZTIME default 15s)
+    cmds:
+      - bash -c 'FUZZTIME="${FUZZTIME:-15s}"; GOCMD="${GOCMD:-go}"; GOVENDORFLAGS=(); [[ -d vendor ]] && GOVENDORFLAGS=(-mod=vendor); for name in $($GOCMD test "${GOVENDORFLAGS[@]}" -list . ./internal/gorrcd/... 2>/dev/null | grep "^Fuzz"); do echo "fuzz $name ./internal/gorrcd"; $GOCMD test "${GOVENDORFLAGS[@]}" -run="^$" -fuzz="$name" -fuzztime="$FUZZTIME" ./internal/gorrcd/...; done'
 
   bench:
-    desc: Run benchmarks for lxmf and mf
+    desc: Run benchmarks for lxmf, mf, rrc, lxst, gorrcd, and golxmd store
     cmds:
-      - "{{.GOCMD}} test -bench=. -benchmem -count=3 -run=^$$ ./pkg/lxmf/... ./pkg/mf/..."
+      - "{{.GOCMD}} test -bench=. -benchmem -count=3 -run=^$$ ./pkg/lxmf/... ./pkg/mf/... ./pkg/rrc/... ./pkg/lxst/... ./internal/gorrcd/..."
 
   stress:
     desc: Run stress tests (skipped with -short)
@@ -117,15 +147,56 @@ tasks:
     cmds:
       - '{{.GOCMD}} test -v -count=1 -timeout 15m -run TestInterop ./pkg/lxmf/...'
 
+  test:lxmf:golxmd:
+    desc: golxmd unit tests and live Python<->Go golxmd interop (requires uv and LXMF-ref)
+    cmds:
+      - '{{.GOCMD}} test -v -count=1 -timeout 20m -run "Test(MessageStore|ValidatePN|EncodePN|RouterDelivery|RouterPropagation|PropagationControl|Interop_Live_.*Golxmd|Interop_Live_GoDeliveryGolxmd)" ./pkg/lxmf/... ./internal/golxmd/...'
+
+  test:golxmd:
+    desc: golxmd daemon unit tests and self-check
+    cmds:
+      - '{{.GOCMD}} test -short -v -count=1 ./internal/golxmd/...'
+
+  test:golxmd:security:
+    desc: golxmd oracle, adversarial, and property tests
+    cmds:
+      - "{{.GOCMD}} test -short -v -count=1 -run='Test(Oracle|Adversarial|Property|Console)_' ./internal/golxmd/..."
+
+  test:golxmd:peer-sync:
+    desc: golxmd propagation peer sync edge-case tests
+    cmds:
+      - '{{.GOCMD}} test -short -v -count=1 -run TestPeer ./pkg/lxmf/...'
+
+  golxmd:self-check:
+    desc: Run golxmd local self-check against default home
+    cmds:
+      - sh scripts/ci/build-golxmd.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+      - GOLXMD_HOME="${GOLXMD_HOME:-}" bin/golxmd-{{.GOOS}}-{{.GOARCH}}{{if eq .GOOS "windows"}}.exe{{end}} --self-check
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  golxmd:
+    desc: Build golxmd LXMF daemon into bin/
+    cmds:
+      - sh scripts/ci/build-golxmd.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
   test:rrc:
     desc: Run all RRC unit and loopback tests
     cmds:
       - '{{.GOCMD}} test -v -count=1 ./pkg/rrc/...'
 
   test:rrc:short:
-    desc: RRC smoke, unit, property, oracle, mutation, acceptance, black-box (skips live mesh)
+    desc: RRC smoke, unit, property, oracle, mutation, acceptance, black-box, security unit (skips live mesh)
     cmds:
-      - "{{.GOCMD}} test -short -v -count=1 -run='Test(Smoke|Unit|Property|Oracle|Mutation|Acceptance|BlackBox)|TestNormalize|TestSanitize|TestEnvelope|TestHello|TestJoined|TestClient|TestHub' ./pkg/rrc/..."
+      - "{{.GOCMD}} test -short -v -count=1 -run='Test(Smoke|Unit|Property|Oracle|Mutation|Acceptance|BlackBox|Security)|TestNormalize|TestSanitize|TestEnvelope|TestHello|TestJoined|TestClient|TestHub' ./pkg/rrc/..."
 
   test:rrc:e2e:
     desc: RRC e2e and acceptance live mesh tests
@@ -147,10 +218,70 @@ tasks:
     cmds:
       - '{{.GOCMD}} test -v -count=1 -timeout 15m -run TestInterop ./pkg/rrc/...'
 
-  test:live:
-    desc: Live Go-to-Go mesh tests (hub/client, LXMF messengers, MF two-way)
+  test:rrc:interop:spec:
+    desc: Run RRC 0.1.3 spec-mapped Go-Python interop tests (requires RRC-ref and uv)
     cmds:
-      - "{{.GOCMD}} test -v -count=1 -timeout 25m -run='Test(E2E_|HubClientLoopback|Messenger_TwoWay)' ./pkg/mf/... ./pkg/lxmf/... ./pkg/rrc/..."
+      - '{{.GOCMD}} test -v -count=1 -timeout 20m -run TestInterop_Spec_ ./pkg/rrc/...'
+
+  test:rrc:security:
+    desc: RRC security, adversarial, and oracle tests (skips live mesh in -short)
+    cmds:
+      - "{{.GOCMD}} test -v -count=1 -timeout 15m -run='Test(Security|Adversarial|Oracle)' ./pkg/rrc/..."
+
+  test:rrc:security:short:
+    desc: RRC security unit and oracle tests only (no mesh)
+    cmds:
+      - "{{.GOCMD}} test -short -v -count=1 -run='Test(Security|Oracle)_' ./pkg/rrc/..."
+
+  test:lxst:
+    desc: Run all LXST unit and loopback tests
+    cmds:
+      - '{{.GOCMD}} test -v -count=1 ./pkg/lxst/... ./tests/lxst/...'
+
+  test:lxst:short:
+    desc: LXST smoke, unit, property, oracle, mutation, acceptance (skips live mesh)
+    cmds:
+      - "{{.GOCMD}} test -short -v -count=1 -run='Test(Smoke|Unit|Property|Oracle|Mutation|Acceptance|BlackBox|Adversarial)' ./pkg/lxst/... ./tests/lxst/..."
+
+  test:lxst:e2e:
+    desc: LXST live mesh call tests (no -short)
+    cmds:
+      - "{{.GOCMD}} test -v -count=1 -timeout 15m -run='Test(GoGo|E2E|Acceptance|Sim)' ./pkg/lxst/call/... ./tests/lxst/..."
+
+  test:lxst:interop:
+    desc: LXST Go-Python interop (requires pip lxst 0.5.1)
+    cmds:
+      - sh scripts/ci/run-lxst-interop.sh
+
+  test:lxst:fuzz:
+    desc: LXST fuzz targets only (FUZZTIME default 15s)
+    cmds:
+      - bash -c 'FUZZTIME="${FUZZTIME:-15s}"; GOCMD="${GOCMD:-go}"; GOVENDORFLAGS=(); [[ -d vendor ]] && GOVENDORFLAGS=(-mod=vendor); for name in $($GOCMD test "${GOVENDORFLAGS[@]}" -list . ./pkg/lxst/... 2>/dev/null | grep "^Fuzz"); do echo "fuzz $name ./pkg/lxst"; $GOCMD test "${GOVENDORFLAGS[@]}" -run="^$" -fuzz="$name" -fuzztime="$FUZZTIME" ./pkg/lxst/...; done'
+
+  rnphone:
+    desc: Build rnphone and rgesp-dial into bin/ (CGO)
+    cmds:
+      - sh scripts/ci/build-rnphone.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  gorrcd:
+    desc: Build gorrcd hub daemon into bin/
+    cmds:
+      - sh scripts/ci/build-gorrcd.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  test:live:
+    desc: Live Go-to-Go mesh tests (hub/client, LXMF messengers, MF two-way, gorrcd, LXST calls)
+    cmds:
+      - "{{.GOCMD}} test -v -count=1 -timeout 25m -run='Test(E2E_|HubClientLoopback|Messenger_TwoWay|GoGo|E2E|Acceptance|Sim)' ./pkg/mf/... ./pkg/lxmf/... ./pkg/rrc/... ./internal/gorrcd/... ./pkg/lxst/call/... ./tests/lxst/..."
 
   coverage:
     desc: Generate test coverage report
@@ -227,3 +358,116 @@ tasks:
     desc: Build example with TinyGo (for testing)
     cmds:
       - tinygo build -o /dev/null ./examples/example.go
+
+  build:
+    desc: Build gorrcd into bin/
+    cmds:
+      - task: gorrcd
+
+  build-librrc:
+    desc: Build librrc shared library into bin/
+    cmds:
+      - sh scripts/ci/build-librrc.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  test:librrc:
+    desc: librrc Go smoke tests
+    cmds:
+      - '{{.GOCMD}} test -v -count=1 ./pkg/librrc/...'
+
+  test-python:
+    desc: Python librrc bindings tests and examples
+    cmds:
+      - sh scripts/ci/run-python-bindings.sh
+
+  test-rust:
+    desc: Rust librrc bindings tests and examples
+    cmds:
+      - sh scripts/ci/run-rust-bindings.sh
+
+  test-java:
+    desc: Java librrc bindings tests and examples
+    cmds:
+      - sh scripts/ci/run-java-bindings.sh
+
+  test-lua:
+    desc: Lua librrc bindings tests and examples
+    cmds:
+      - sh scripts/ci/run-lua-bindings.sh
+
+  test-bindings:
+    desc: Run all language binding smoke tests
+    deps: [test-python, test-rust, test-java, test-lua, test-c, test-cpp]
+
+  test-c:
+    desc: C librrc bindings tests and examples
+    cmds:
+      - sh scripts/ci/run-c-bindings.sh
+
+  test-cpp:
+    desc: C++ librrc bindings tests
+    cmds:
+      - sh scripts/ci/run-cpp-bindings.sh
+
+  test-codec:
+    desc: MF, LXMF, and LXST codec library tests
+    cmds:
+      - sh scripts/ci/run-codec-bindings.sh
+
+  example:lxst:
+    desc: Run LXST wire codec example
+    cmds:
+      - '{{.GOCMD}} run ./examples/lxst_codec.go'
+
+  example:lxst:call:
+    desc: Run minimal LXST call example
+    cmds:
+      - '{{.GOCMD}} run ./examples/lxst/minimal/main.go'
+
+  test-hub-client:
+    desc: Live UDP hub-client binding tests
+    cmds:
+      - sh scripts/ci/run-hub-client-bindings.sh
+
+  build-libmf:
+    desc: Build libmf shared library into bin/
+    cmds:
+      - sh scripts/ci/build-libmf.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  build-liblxmf:
+    desc: Build liblxmf shared library into bin/
+    cmds:
+      - sh scripts/ci/build-liblxmf.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  build-liblxst:
+    desc: Build liblxst shared library into bin/
+    cmds:
+      - sh scripts/ci/build-liblxst.sh "{{.GOOS}}" "{{.GOARCH}}" bin
+    vars:
+      GOOS:
+        sh: go env GOOS
+      GOARCH:
+        sh: go env GOARCH
+
+  test:liblxst:
+    desc: liblxst Go smoke tests
+    cmds:
+      - '{{.GOCMD}} test -v -count=1 ./pkg/liblxst/...'
+
+  build-bindings:
+    desc: Build all binding shared libraries
+    deps: [build-librrc, build-libmf, build-liblxmf, build-liblxst]

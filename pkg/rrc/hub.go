@@ -26,6 +26,14 @@ type HubConfig struct {
 	MaxResourceBytes uint64
 	// Capabilities overrides WELCOME capability flags. Nil uses DefaultHubCapabilities.
 	Capabilities map[uint64]any
+	// Policy is optional daemon policy. Nil keeps open-room library defaults.
+	Policy HubPolicy
+	// OnInboundBytes is called for each inbound packet size in bytes.
+	OnInboundBytes func(n int)
+	// OnBadPacket is called when an inbound packet fails to decode.
+	OnBadPacket func()
+	// OnRateLimited is called when a peer exceeds RateLimitMsgsPerMinute.
+	OnRateLimited func()
 }
 
 func (c *HubConfig) applyDefaults() {
@@ -73,22 +81,24 @@ type hubPeer struct {
 	peerHash     []byte
 	active       bool
 	rooms        map[string]struct{}
-	msgTimes     []time.Time
+	tokens       float64
+	lastRefill   time.Time
 	pendingHello *Envelope
 }
 
 // Hub is an RRC hub that accepts Links and relays room traffic.
 type Hub struct {
-	mu       sync.Mutex
-	tr       *transport.Transport
-	dest     *destination.Destination
-	id       *identity.Identity
-	sender   []byte
-	cfg      HubConfig
-	peers    map[peerID]*hubPeer
-	rooms    map[string]map[peerID]struct{}
-	handlers HubHandlers
-	started  bool
+	mu        sync.Mutex
+	tr        *transport.Transport
+	dest      *destination.Destination
+	id        *identity.Identity
+	sender    []byte
+	cfg       HubConfig
+	peers     map[peerID]*hubPeer
+	rooms     map[string]map[peerID]struct{}
+	nickIndex map[string]map[peerID]struct{}
+	handlers  HubHandlers
+	started   bool
 }
 
 // NewHub builds a hub bound to dest. Call Start to accept sessions.
@@ -102,14 +112,15 @@ func NewHub(tr *transport.Transport, dest *destination.Destination, cfg HubConfi
 		return nil, ErrNilArgument
 	}
 	h := &Hub{
-		tr:       tr,
-		dest:     dest,
-		id:       id,
-		sender:   append([]byte(nil), id.Hash()...),
-		cfg:      cfg,
-		peers:    make(map[peerID]*hubPeer),
-		rooms:    make(map[string]map[peerID]struct{}),
-		handlers: cfg.Handlers,
+		tr:        tr,
+		dest:      dest,
+		id:        id,
+		sender:    append([]byte(nil), id.Hash()...),
+		cfg:       cfg,
+		peers:     make(map[peerID]*hubPeer),
+		rooms:     make(map[string]map[peerID]struct{}),
+		nickIndex: make(map[string]map[peerID]struct{}),
+		handlers:  cfg.Handlers,
 	}
 	return h, nil
 }
@@ -155,17 +166,10 @@ func peerKey(hash []byte) peerID {
 }
 
 func (h *Hub) acceptLink(lnk *link.Link) {
-	n := h.cfg.Limits.RateLimitMsgsPerMinute
-	if n < 8 {
-		n = 8
-	}
-	if n > 256 {
-		n = 256
-	}
-	rateCap := int(n) // #nosec G115 -- n is clamped to 8..256
 	p := &hubPeer{
-		rooms:    make(map[string]struct{}),
-		msgTimes: make([]time.Time, 0, rateCap),
+		rooms:      make(map[string]struct{}),
+		tokens:     float64(h.cfg.Limits.RateLimitMsgsPerMinute),
+		lastRefill: time.Now(),
 	}
 
 	var registerOnce sync.Once
@@ -195,6 +199,15 @@ func (h *Hub) acceptLink(lnk *link.Link) {
 		if old != nil && old.sess != nil {
 			old.sess.close()
 		}
+		if pol := h.cfg.Policy; pol != nil && len(hash) == IdentityLength {
+			if err := pol.OnIdentified(hash); err != nil {
+				if p.sess != nil {
+					_ = p.sess.sendType(TypeError, "", err.Error(), "")
+					p.sess.close()
+				}
+				return
+			}
+		}
 		h.mu.Lock()
 		pending := p.pendingHello
 		p.pendingHello = nil
@@ -206,6 +219,7 @@ func (h *Hub) acceptLink(lnk *link.Link) {
 	}
 
 	p.sess = newSession(lnk, h.sender, false, func(env *Envelope) {
+		defer recoverDiscard()
 		if remote := lnk.GetRemoteIdentity(); remote != nil {
 			register(remote.Hash())
 		}
@@ -226,6 +240,17 @@ func (h *Hub) acceptLink(lnk *link.Link) {
 	}, func() {
 		h.dropPeerIf(p)
 	})
+	p.sess.onBytes = func(n int) {
+		if h.cfg.OnInboundBytes != nil {
+			h.cfg.OnInboundBytes(n)
+		}
+	}
+	p.sess.onBad = func() {
+		if h.cfg.OnBadPacket != nil {
+			h.cfg.OnBadPacket()
+		}
+		_ = h.replyError(p, "bad message")
+	}
 
 	lnk.SetRemoteIdentifiedCallback(func(_ *link.Link, id *identity.Identity) {
 		if id != nil {
@@ -235,6 +260,9 @@ func (h *Hub) acceptLink(lnk *link.Link) {
 
 	if remote := lnk.GetRemoteIdentity(); remote != nil {
 		register(remote.Hash())
+	}
+	if pol := h.cfg.Policy; pol != nil {
+		pol.OnLink(lnk)
 	}
 }
 
@@ -259,6 +287,7 @@ func (h *Hub) dropPeerIf(p *hubPeer) {
 		nick = p.sess.getNick()
 	}
 	delete(h.peers, key)
+	h.unindexNickLocked(key, nick)
 	for room := range p.rooms {
 		others := h.roomPeersLocked(room, key)
 		if members, ok := h.rooms[room]; ok {
@@ -296,18 +325,31 @@ func (h *Hub) applyInboundNick(p *hubPeer, nick string) error {
 	if uint64(len(nick)) > h.cfg.Limits.MaxNickBytes {
 		return ErrNickTooLong
 	}
+	old := p.sess.getNick()
 	p.sess.setNick(nick)
+	if len(p.peerHash) == IdentityLength {
+		h.reindexNick(peerKey(p.peerHash), old, nick)
+	}
 	return nil
 }
 
 func (h *Hub) handlePeer(p *hubPeer, env *Envelope) {
+	defer recoverDiscard()
+	if !h.takeToken(p) {
+		if h.cfg.OnRateLimited != nil {
+			h.cfg.OnRateLimited()
+		}
+		_ = h.replyError(p, "Rate limit exceeded. Try again later.")
+		return
+	}
+
 	h.mu.Lock()
 	active := p.active
 	h.mu.Unlock()
 
 	if env.HasNick {
 		if err := h.applyInboundNick(p, env.Nick); err != nil {
-			_ = h.sendError(p, "nickname too long")
+			_ = h.replyError(p, "nickname too long")
 			if !active {
 				p.sess.close()
 			}
@@ -316,7 +358,7 @@ func (h *Hub) handlePeer(p *hubPeer, env *Envelope) {
 	} else if env.Type == TypeHello {
 		if n := HelloLegacyNick(env.Body); n != "" {
 			if err := h.applyInboundNick(p, n); err != nil {
-				_ = h.sendError(p, "nickname too long")
+				_ = h.replyError(p, "nickname too long")
 				if !active {
 					p.sess.close()
 					return
@@ -325,8 +367,16 @@ func (h *Hub) handlePeer(p *hubPeer, env *Envelope) {
 		}
 	}
 
+	if env.Type == TypePong {
+		if pol := h.cfg.Policy; pol != nil {
+			pol.OnPong(p.peerHash)
+		}
+		return
+	}
+
 	if !active {
 		if env.Type != TypeHello {
+			_ = h.replyError(p, "send HELLO first")
 			return
 		}
 		h.onHello(p, env)
@@ -335,19 +385,27 @@ func (h *Hub) handlePeer(p *hubPeer, env *Envelope) {
 
 	switch env.Type {
 	case TypeHello:
-		return
+		h.reHello(p, env)
 	case TypeJoin:
 		h.onJoin(p, env)
 	case TypePart:
 		h.onPart(p, env)
 	case TypeNotice:
+		if h.tryIntercept(p, env) {
+			return
+		}
 		if env.HasDestination {
 			h.onDirectNotice(p, env)
 			return
 		}
-		h.onRoomContent(p, env)
-	case TypeMsg, TypeAction:
-		h.onRoomContent(p, env)
+		h.dispatchContent(p, env)
+	case TypeMsg:
+		if h.tryIntercept(p, env) {
+			return
+		}
+		h.dispatchContent(p, env)
+	case TypeAction:
+		h.dispatchContent(p, env)
 	case TypeResourceEnvelope:
 		h.onResourceEnvelope(p, env)
 	case TypePing:
@@ -387,17 +445,27 @@ func (h *Hub) onHello(p *hubPeer, env *Envelope) {
 	if cb != nil {
 		cb(p.peerHash, body, env)
 	}
+	if pol := h.cfg.Policy; pol != nil {
+		pol.AfterWelcome(p.peerHash)
+	}
 }
 
 func (h *Hub) onJoin(p *hubPeer, env *Envelope) {
 	room := NormalizeRoom(env.Room)
 	if room == "" {
-		_ = h.sendError(p, "missing room")
+		_ = h.replyError(p, "missing room")
 		return
 	}
 	if uint64(len(room)) > h.cfg.Limits.MaxRoomNameBytes {
-		_ = h.sendError(p, "room name too long")
+		_ = h.replyError(p, "room name too long")
 		return
+	}
+
+	if pol := h.cfg.Policy; pol != nil {
+		if err := pol.AllowJoin(p.peerHash, room, env.Body); err != nil {
+			_ = h.replyError(p, err.Error())
+			return
+		}
 	}
 
 	key := peerKey(p.peerHash)
@@ -405,7 +473,7 @@ func (h *Hub) onJoin(p *hubPeer, env *Envelope) {
 	if _, ok := p.rooms[room]; !ok {
 		if uint64(len(p.rooms)) >= h.cfg.Limits.MaxRoomsPerSession {
 			h.mu.Unlock()
-			_ = h.sendError(p, "room limit exceeded")
+			_ = h.replyError(p, "room limit exceeded")
 			return
 		}
 		p.rooms[room] = struct{}{}
@@ -441,6 +509,9 @@ func (h *Hub) onJoin(p *hubPeer, env *Envelope) {
 	_ = p.sess.sendType(TypeJoined, room, body, "")
 	if cb != nil {
 		cb(p.peerHash, room, env)
+	}
+	if pol := h.cfg.Policy; pol != nil {
+		pol.AfterJoin(p.peerHash, room)
 	}
 }
 
@@ -478,29 +549,44 @@ func (h *Hub) onPart(p *hubPeer, env *Envelope) {
 	if cb != nil {
 		cb(p.peerHash, room, env)
 	}
+	if pol := h.cfg.Policy; pol != nil {
+		pol.AfterPart(p.peerHash, room)
+	}
+}
+
+func (h *Hub) tryIntercept(p *hubPeer, env *Envelope) bool {
+	if pol := h.cfg.Policy; pol != nil {
+		return pol.Intercept(p.peerHash, env)
+	}
+	return false
+}
+
+func (h *Hub) dispatchContent(p *hubPeer, env *Envelope) {
+	if pol := h.cfg.Policy; pol != nil {
+		if err := pol.AllowContent(p.peerHash, env); err != nil {
+			_ = h.replyError(p, err.Error())
+			return
+		}
+	}
+	h.onRoomContent(p, env)
 }
 
 func (h *Hub) onRoomContent(p *hubPeer, env *Envelope) {
 	room := NormalizeRoom(env.Room)
 	if room == "" {
-		_ = h.sendError(p, "missing room")
-		return
-	}
-
-	if !h.allowRate(p) {
-		_ = h.sendError(p, "Rate limit exceeded. Try again later.")
+		_ = h.replyError(p, "missing room")
 		return
 	}
 
 	if env.HasBody && BodySizeBytes(env.Body) > h.cfg.Limits.MaxMsgBodyBytes {
-		_ = h.sendError(p, "message body too large")
+		_ = h.replyError(p, "message body too large")
 		return
 	}
 
 	h.mu.Lock()
-	if _, ok := p.rooms[room]; !ok {
+	if _, ok := p.rooms[room]; !ok && h.cfg.Policy == nil {
 		h.mu.Unlock()
-		_ = h.sendError(p, "not a member of room")
+		_ = h.replyError(p, "not a member of room")
 		return
 	}
 	roomMembers := h.rooms[room]
@@ -538,30 +624,36 @@ func (h *Hub) onRoomContent(p *hubPeer, env *Envelope) {
 	}
 }
 
-func (h *Hub) allowRate(p *hubPeer) bool {
+func (h *Hub) takeToken(p *hubPeer) bool {
 	limit := h.cfg.Limits.RateLimitMsgsPerMinute
 	if limit == 0 {
 		return true
 	}
 	now := time.Now()
-	cutoff := now.Add(-time.Minute)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	kept := p.msgTimes[:0]
-	for _, t := range p.msgTimes {
-		if t.After(cutoff) {
-			kept = append(kept, t)
-		}
+	elapsed := now.Sub(p.lastRefill).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
 	}
-	p.msgTimes = kept
-	if uint64(len(p.msgTimes)) >= limit {
+	tokenCap := float64(limit)
+	p.tokens += elapsed * (tokenCap / 60.0)
+	if p.tokens > tokenCap {
+		p.tokens = tokenCap
+	}
+	p.lastRefill = now
+	if p.tokens < 1 {
 		return false
 	}
-	p.msgTimes = append(p.msgTimes, now)
+	p.tokens--
 	return true
 }
 
-func (h *Hub) sendError(p *hubPeer, msg string) error {
+func (h *Hub) allowRate(p *hubPeer) bool {
+	return h.takeToken(p)
+}
+
+func (h *Hub) replyError(p *hubPeer, msg string) error {
 	return p.sess.sendType(TypeError, "", msg, "")
 }
 
@@ -581,19 +673,15 @@ func (h *Hub) roomPeersLocked(room string, exceptKey peerID) []*hubPeer {
 
 func (h *Hub) onDirectNotice(p *hubPeer, env *Envelope) {
 	if env.HasRoom {
-		_ = h.sendError(p, "direct notice must not include room")
+		_ = h.replyError(p, "direct notice must not include room")
 		return
 	}
 	if !env.HasDestination || len(env.Destination) != IdentityLength {
-		_ = h.sendError(p, "direct notice requires destination identity")
-		return
-	}
-	if !h.allowRate(p) {
-		_ = h.sendError(p, "Rate limit exceeded. Try again later.")
+		_ = h.replyError(p, "direct notice requires destination identity")
 		return
 	}
 	if env.HasBody && BodySizeBytes(env.Body) > h.cfg.Limits.MaxMsgBodyBytes {
-		_ = h.sendError(p, "message body too large")
+		_ = h.replyError(p, "message body too large")
 		return
 	}
 
@@ -604,7 +692,7 @@ func (h *Hub) onDirectNotice(p *hubPeer, env *Envelope) {
 	cb := h.handlers.OnMsg
 	h.mu.Unlock()
 	if !active {
-		_ = h.sendError(p, "destination not connected")
+		_ = h.replyError(p, "destination not connected")
 		return
 	}
 
@@ -638,17 +726,23 @@ func (h *Hub) onPing(p *hubPeer, env *Envelope) {
 
 func (h *Hub) onResourceEnvelope(p *hubPeer, env *Envelope) {
 	if !h.cfg.EnableResourceTransfer {
-		_ = h.sendError(p, "resource transfer disabled")
+		_ = h.replyError(p, "resource transfer disabled")
 		return
 	}
 	body, reason := ValidateResourceEnvelopeBody(env.Body)
 	if reason != "" {
-		_ = h.sendError(p, reason)
+		_ = h.replyError(p, reason)
 		return
 	}
 	if body.Size > h.cfg.MaxResourceBytes {
-		_ = h.sendError(p, fmt.Sprintf("resource too large: %d > %d", body.Size, h.cfg.MaxResourceBytes))
+		_ = h.replyError(p, fmt.Sprintf("resource too large: %d > %d", body.Size, h.cfg.MaxResourceBytes))
 		return
+	}
+	if pol := h.cfg.Policy; pol != nil {
+		if err := pol.OnResourceEnvelope(p.peerHash, env); err != nil {
+			_ = h.replyError(p, err.Error())
+			return
+		}
 	}
 	if cb := h.handlers.OnResource; cb != nil {
 		cb(p.peerHash, env)
@@ -664,6 +758,7 @@ func (h *Hub) Close() {
 	}
 	h.peers = make(map[peerID]*hubPeer)
 	h.rooms = make(map[string]map[peerID]struct{})
+	h.nickIndex = make(map[string]map[peerID]struct{})
 	h.mu.Unlock()
 	for _, p := range peers {
 		p.sess.close()

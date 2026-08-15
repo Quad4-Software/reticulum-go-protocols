@@ -2806,6 +2806,19 @@ func (t *Transport) handleProofPacket(pkt *packet.Packet, iface common.NetworkIn
 		return
 	}
 
+	if pkt.Context == packet.ContextNone && pkt.DestinationType == DestTypeLink {
+		linkID := pkt.DestinationHash
+		if len(linkID) > 16 {
+			linkID = linkID[:16]
+		}
+		linkKey := hash16FromSlice(linkID)
+		t.mutex.RLock()
+		if linkObj, ok := t.links[linkKey]; ok && linkObj != nil {
+			pkt.Link = linkObj
+		}
+		t.mutex.RUnlock()
+	}
+
 	_ = t.forwardReverseProof(pkt, iface)
 
 	var proofHash []byte

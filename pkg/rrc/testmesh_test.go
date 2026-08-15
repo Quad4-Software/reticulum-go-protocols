@@ -3,12 +3,15 @@ package rrc
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"quad4/reticulum-go/pkg/common"
+	"quad4/reticulum-go/pkg/destination"
 	"quad4/reticulum-go/pkg/identity"
 	"quad4/reticulum-go/pkg/interfaces"
+	"quad4/reticulum-go/pkg/link"
 	"quad4/reticulum-go/pkg/transport"
 )
 
@@ -159,4 +162,57 @@ func mustEnvelope(t *testing.T, typ uint64, sender []byte) *Envelope {
 		t.Fatal(err)
 	}
 	return env
+}
+
+func dialMeshPreHello(t *testing.T, m *testMesh, which byte, onMsg MessageHandler) *session {
+	t.Helper()
+	var tr *transport.Transport
+	var id *identity.Identity
+	switch which {
+	case 'A':
+		tr, id = m.trA, m.idA
+	case 'B':
+		tr, id = m.trB, m.idB
+	default:
+		t.Fatalf("unknown client %q", which)
+	}
+	remote, err := identity.Recall(m.hubHash)
+	if err != nil || remote == nil {
+		t.Fatal(err)
+	}
+	destOut, err := destination.FromHash(m.hubHash, remote, destination.Single, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lnk := link.NewLink(destOut, tr, nil, nil, nil)
+	sess := newSession(lnk, id.Hash(), true, onMsg, nil)
+	if err := lnk.Establish(); err != nil {
+		t.Fatal(err)
+	}
+	lnk.Start()
+	deadline := time.Now().Add(10 * time.Second)
+	for !lnk.IsActive() {
+		if time.Now().After(deadline) {
+			t.Fatal("link timeout")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err := lnk.Identify(id); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	t.Cleanup(func() { lnk.Teardown() })
+	return sess
+}
+
+func waitError(t *testing.T, ch <-chan string, substr string) {
+	t.Helper()
+	select {
+	case msg := <-ch:
+		if !strings.Contains(strings.ToLower(msg), strings.ToLower(substr)) {
+			t.Fatalf("error=%q want substring %q", msg, substr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timeout waiting for error containing %q", substr)
+	}
 }

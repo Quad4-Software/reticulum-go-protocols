@@ -68,29 +68,29 @@ def _bytesify(v: Any) -> Any:
     return v
 
 
+def _jsonify_value(v: Any) -> Any:
+    if isinstance(v, (bytes, bytearray)):
+        return "hex:" + bytes(v).hex()
+    if isinstance(v, dict):
+        out: dict[str, Any] = {}
+        for ik, iv in v.items():
+            if isinstance(ik, int):
+                ikey = f"0x{ik:02x}"
+            else:
+                ikey = str(ik)
+            out[ikey] = _jsonify_value(iv)
+        return out
+    if isinstance(v, list):
+        return [_jsonify_value(x) for x in v]
+    return v
+
+
 def _fields_out(fields: dict[int, Any] | None) -> dict[str, Any]:
     if not fields:
         return {}
     out: dict[str, Any] = {}
     for k, v in fields.items():
-        key = f"0x{k:02x}"
-        if isinstance(v, bytes):
-            out[key] = "hex:" + v.hex()
-        elif isinstance(v, dict):
-            inner: dict[str, Any] = {}
-            for ik, iv in v.items():
-                ikey = f"0x{int(ik):02x}"
-                if isinstance(iv, bytes):
-                    inner[ikey] = "hex:" + iv.hex()
-                else:
-                    inner[ikey] = iv
-            out[key] = inner
-        elif isinstance(v, list):
-            out[key] = [
-                ("hex:" + x.hex()) if isinstance(x, bytes) else x for x in v
-            ]
-        else:
-            out[key] = v
+        out[f"0x{k:02x}"] = _jsonify_value(v)
     return out
 
 
@@ -433,6 +433,156 @@ def cmd_live_recv(req: dict[str, Any]) -> dict[str, Any]:
             pass
 
 
+def cmd_live_send_delivery(req: dict[str, Any]) -> dict[str, Any]:
+    """Send one opportunistic LXMF message to an existing delivery destination hash."""
+    listen_port = int(req["listen_port"])
+    forward_port = int(req["forward_port"])
+    dest_hex = req["dest_hash"]
+    title = req.get("title", "")
+    text = req.get("text", "")
+    timeout_s = float(req.get("timeout_s", 40))
+
+    configdir = Path(tempfile.mkdtemp(prefix="lxmf-send-"))
+    try:
+        _write_rns_config(configdir, listen_port, forward_port)
+        _reticulum = RNS.Reticulum(str(configdir))
+        storage = configdir / "storage"
+        storage.mkdir(parents=True, exist_ok=True)
+        router = LXMF_pkg.LXMRouter(identity=RNS.Identity(), storagepath=str(storage))
+        src = router.register_delivery_identity(router.identity, display_name="interop-sender")
+        dest_hash = bytes.fromhex(dest_hex)
+        if not RNS.Transport.has_path(dest_hash):
+            RNS.Transport.request_path(dest_hash)
+        deadline = time.time() + timeout_s
+        while not RNS.Transport.has_path(dest_hash) and time.time() < deadline:
+            src.announce()
+            time.sleep(0.2)
+        if not RNS.Transport.has_path(dest_hash):
+            return {"ok": False, "error": "no path to destination"}
+
+        recipient = RNS.Identity.recall(dest_hash)
+        if recipient is None:
+            return {"ok": False, "error": "destination identity not known"}
+
+        out_dest = RNS.Destination(
+            recipient,
+            RNS.Destination.OUT,
+            RNS.Destination.SINGLE,
+            LXMF.APP_NAME,
+            "delivery",
+        )
+        lxm = LXMessage(
+            out_dest,
+            src,
+            text,
+            title,
+            desired_method=LXMessage.OPPORTUNISTIC,
+        )
+        router.handle_outbound(lxm)
+        deadline = time.time() + min(timeout_s, 30.0)
+        while lxm.state not in (LXMessage.SENT, LXMessage.DELIVERED) and time.time() < deadline:
+            router.process_outbound()
+            time.sleep(0.15)
+        if lxm.state not in (LXMessage.SENT, LXMessage.DELIVERED):
+            return {"ok": False, "error": f"message not sent state={lxm.state}"}
+        return {"ok": True, "hash": _hex(lxm.hash)}
+    finally:
+        try:
+            shutil.rmtree(configdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def cmd_live_send_propagation(req: dict[str, Any]) -> dict[str, Any]:
+    """Upload one propagated LXMF message to a propagation node destination hash."""
+    listen_port = int(req["listen_port"])
+    forward_port = int(req["forward_port"])
+    pn_hex = req["propagation_hash"]
+    recipient_hex = req.get("recipient_hash", "")
+    title = req.get("title", "")
+    text = req.get("text", "")
+    timeout_s = float(req.get("timeout_s", 120))
+
+    configdir = Path(tempfile.mkdtemp(prefix="lxmf-prop-send-"))
+    try:
+        _write_rns_config(configdir, listen_port, forward_port)
+        _reticulum = RNS.Reticulum(str(configdir))
+        storage = configdir / "storage"
+        storage.mkdir(parents=True, exist_ok=True)
+        router = LXMF_pkg.LXMRouter(identity=RNS.Identity(), storagepath=str(storage))
+        src = router.register_delivery_identity(router.identity, display_name="interop-prop-sender")
+        pn_hash = bytes.fromhex(pn_hex)
+        if not RNS.Transport.has_path(pn_hash):
+            RNS.Transport.request_path(pn_hash)
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            src.announce()
+            pn_app_data = RNS.Identity.recall_app_data(pn_hash)
+            if RNS.Transport.has_path(pn_hash) and LXMF.pn_announce_data_is_valid(pn_app_data):
+                break
+            time.sleep(0.2)
+        if not RNS.Transport.has_path(pn_hash):
+            return {"ok": False, "error": "no path to propagation node"}
+        if not LXMF.pn_announce_data_is_valid(RNS.Identity.recall_app_data(pn_hash)):
+            return {"ok": False, "error": "propagation node announce data unavailable"}
+
+        pn_identity = RNS.Identity.recall(pn_hash)
+        if pn_identity is None:
+            return {"ok": False, "error": "propagation node identity not known"}
+
+        router.set_outbound_propagation_node(pn_hash)
+
+        if recipient_hex:
+            recipient_hash = bytes.fromhex(recipient_hex)
+            recipient_identity = RNS.Identity.recall(recipient_hash)
+            if recipient_identity is None:
+                recipient_identity = RNS.Identity()
+                RNS.Identity.remember(recipient_hash, recipient_identity.get_public_key())
+            recipient = RNS.Destination(
+                recipient_identity,
+                RNS.Destination.OUT,
+                RNS.Destination.SINGLE,
+                LXMF.APP_NAME,
+                "delivery",
+            )
+        else:
+            recipient_id = RNS.Identity()
+            recipient = RNS.Destination(
+                recipient_id,
+                RNS.Destination.OUT,
+                RNS.Destination.SINGLE,
+                LXMF.APP_NAME,
+                "delivery",
+            )
+
+        lxm = LXMessage(
+            recipient,
+            src,
+            text,
+            title,
+            desired_method=LXMessage.PROPAGATED,
+        )
+        router.handle_outbound(lxm)
+
+        deadline = time.time() + timeout_s
+        while lxm.state != LXMessage.SENT and time.time() < deadline:
+            router.process_outbound()
+            if lxm.progress is not None and lxm.progress >= 1.0:
+                break
+            time.sleep(0.15)
+        if lxm.state != LXMessage.SENT and (lxm.progress is None or lxm.progress < 1.0):
+            return {
+                "ok": False,
+                "error": f"propagation upload incomplete state={lxm.state} progress={lxm.progress}",
+            }
+        return {"ok": True, "hash": _hex(lxm.hash), "progress": lxm.progress}
+    finally:
+        try:
+            shutil.rmtree(configdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 HANDLERS = {
     "ping": cmd_ping,
     "pack": cmd_pack,
@@ -450,6 +600,8 @@ HANDLERS = {
     "paper_decode": cmd_paper_decode,
     "ticket_stamp": cmd_ticket_stamp,
     "live_recv": cmd_live_recv,
+    "live_send_delivery": cmd_live_send_delivery,
+    "live_send_propagation": cmd_live_send_propagation,
 }
 
 

@@ -167,6 +167,25 @@ func EncodeAnnounceAppDataV5WithFeatures(displayName string, stampCost int64, fe
 	return marshalAnnounceAppData(payload)
 }
 
+// EncodePNAnnounceAppData builds the 7-element propagation node announce payload.
+func EncodePNAnnounceAppData(timebase int64, transferLimitKB, syncLimitKB int, stampTarget, stampFlex, peeringCost int, nodeName string) ([]byte, error) {
+	md := map[byte]any{}
+	if nodeName != "" {
+		md[PNMetaName] = []byte(nodeName)
+	}
+	isPN := transferLimitKB > 0
+	payload := []any{
+		nil,
+		timebase,
+		isPN,
+		int64(transferLimitKB),
+		int64(syncLimitKB),
+		[]any{int64(stampTarget), int64(stampFlex), int64(peeringCost)},
+		md,
+	}
+	return marshalAnnounceAppData(payload)
+}
+
 func marshalAnnounceAppData(payload []any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := msgpack.NewEncoder(&buf)

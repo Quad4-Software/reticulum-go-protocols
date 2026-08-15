@@ -901,6 +901,52 @@ func (l *Link) SendPacketWithContext(data []byte, context byte) error {
 	return l.transport.SendPacket(p)
 }
 
+// SendPacketWithReceipt sends encrypted link data and tracks delivery proof.
+func (l *Link) SendPacketWithReceipt(data []byte) (*packet.PacketReceipt, error) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.status.Load() != int32(StatusActive) {
+		return nil, errors.New("link not active")
+	}
+
+	wireData, err := l.encryptLocked(data)
+	if err != nil {
+		return nil, err
+	}
+
+	p := &packet.Packet{
+		HeaderType:      packet.HeaderType1,
+		PacketType:      packet.PacketTypeData,
+		TransportType:   0,
+		Context:         packet.ContextNone,
+		ContextFlag:     packet.FlagUnset,
+		Hops:            0,
+		DestinationType: DestTypeLink,
+		DestinationHash: l.linkID,
+		Data:            wireData,
+		CreateReceipt:   false,
+	}
+
+	if err := p.Pack(); err != nil {
+		return nil, err
+	}
+
+	l.recordOutboundData()
+	if err := l.transport.SendPacket(p); err != nil {
+		return nil, err
+	}
+
+	receipt := packet.NewPacketReceipt(p)
+	if remote := l.GetRemoteIdentity(); remote != nil {
+		receipt.SetDestinationIdentity(remote)
+	} else {
+		receipt.SetLink(l)
+	}
+	l.transport.RegisterReceipt(receipt)
+	return receipt, nil
+}
+
 func (l *Link) HandleInbound(pkt *packet.Packet) error {
 	if pkt.PacketType == packet.PacketTypeData {
 		l.mutex.Lock()
@@ -2732,6 +2778,66 @@ func (l *Link) Validate(signature, message []byte) bool {
 	}
 
 	return l.remoteIdentity.Verify(message, signature)
+}
+
+// ProvePacket sends an explicit delivery proof for a data packet received on this link.
+func (l *Link) ProvePacket(pkt *packet.Packet) error {
+	if pkt == nil {
+		return errors.New("nil packet")
+	}
+	packetHash := append([]byte(nil), pkt.GetHash()...)
+
+	l.mutex.RLock()
+	privBytes := bufBytes(l.sigPriv)
+	transport := l.transport
+	linkID := append([]byte(nil), l.linkID...)
+	dest := l.destination
+	active := l.status.Load() == int32(StatusActive)
+	l.mutex.RUnlock()
+
+	if !active {
+		return errors.New("link not active")
+	}
+	if transport == nil {
+		return errors.New("link has no transport")
+	}
+
+	var signature []byte
+	if dest != nil {
+		if owner := dest.GetIdentity(); owner != nil {
+			sig, err := owner.Sign(packetHash)
+			if err != nil {
+				return fmt.Errorf("sign link data proof: %w", err)
+			}
+			signature = sig
+		}
+	}
+	if len(signature) == 0 {
+		if len(privBytes) == 0 {
+			return errors.New("link has no signing key")
+		}
+		signature = cryptography.Sign(ed25519.PrivateKey(privBytes), packetHash)
+	}
+
+	proofData := append(packetHash, signature...)
+
+	proofPkt := &packet.Packet{
+		HeaderType:      packet.HeaderType1,
+		PacketType:      packet.PacketTypeProof,
+		TransportType:   0,
+		Context:         packet.ContextNone,
+		ContextFlag:     packet.FlagUnset,
+		Hops:            0,
+		DestinationType: DestTypeLink,
+		DestinationHash: linkID,
+		Data:            proofData,
+		CreateReceipt:   false,
+	}
+	if err := proofPkt.Pack(); err != nil {
+		return err
+	}
+	l.recordOutbound()
+	return transport.SendPacket(proofPkt)
 }
 
 func (l *Link) generateEphemeralKeys() error {

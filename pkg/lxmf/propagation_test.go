@@ -106,6 +106,9 @@ func TestPackPropagated_RoundTripFields(t *testing.T) {
 }
 
 func TestSendPropagated_NoPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping propagation path wait in short mode")
+	}
 	tr := transport.NewTransport(common.DefaultConfig())
 	id, _ := identity.NewIdentity()
 	m, err := NewDeliveryMessenger(id, tr)

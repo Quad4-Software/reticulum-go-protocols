@@ -255,3 +255,46 @@ func TestOracle_ResourceEnvelopeKeysMatchRrcd(t *testing.T) {
 	}
 	t.Log("RRC_RESOURCE_KEYS_PROVED")
 }
+
+func TestOracle_ForwardedEnvelopeNeverTrustsWireSender(t *testing.T) {
+	sender := bytes.Repeat([]byte{0x99}, IdentityLength)
+	peer := bytes.Repeat([]byte{0xaa}, IdentityLength)
+	env := mustEnvelope(t, TypeMsg, sender)
+	env.Room = "#x"
+	env.HasRoom = true
+	env.Body = "m"
+	env.HasBody = true
+	fwd, err := envelopeFrom(env.Type, peer, env.MsgID, env.Timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwd.Room = env.Room
+	fwd.HasRoom = true
+	fwd.Body = env.Body
+	fwd.HasBody = true
+	if bytes.Equal(fwd.Sender, sender) {
+		t.Fatal("envelopeFrom must not copy wire sender from spoofed env")
+	}
+	if !bytes.Equal(fwd.Sender, peer) {
+		t.Fatal("forward path must stamp authenticated peer")
+	}
+}
+
+func TestOracle_ErrorTypeDoesNotForward(t *testing.T) {
+	h := &Hub{cfg: HubConfig{}}
+	h.cfg.applyDefaults()
+	p := &hubPeer{
+		peerHash: bytes.Repeat([]byte{0x01}, IdentityLength),
+		active:   true,
+		sess:     &session{sender: bytes.Repeat([]byte{0x02}, IdentityLength)},
+		rooms:    map[string]struct{}{"#r": {}},
+	}
+	h.peers = map[peerID]*hubPeer{peerKey(p.peerHash): p}
+	h.rooms = map[string]map[peerID]struct{}{"#r": {peerKey(p.peerHash): {}}}
+	env := mustEnvelope(t, TypeError, p.peerHash)
+	env.Room = "#r"
+	env.HasRoom = true
+	env.Body = "oops"
+	env.HasBody = true
+	h.handlePeer(p, env)
+}

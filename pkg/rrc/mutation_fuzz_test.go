@@ -151,3 +151,35 @@ func TestMutation_WrongFixedLengths(t *testing.T) {
 		t.Fatal("short sender should fail")
 	}
 }
+
+func FuzzRRC_ValidateResourceEnvelope(f *testing.F) {
+	f.Add([]byte{1, 2, 3}, uint8(0), uint8(1))
+	f.Fuzz(func(t *testing.T, id []byte, kindTag uint8, size uint8) {
+		if len(id) > 32 {
+			id = id[:32]
+		}
+		kind := ResourceKindBlob
+		switch kindTag % 4 {
+		case 1:
+			kind = ResourceKindNotice
+		case 2:
+			kind = ResourceKindMOTD
+		case 3:
+			kind = ""
+		}
+		body := map[uint64]any{
+			ResourceKeyID:   append([]byte(nil), id...),
+			ResourceKeyKind: kind,
+			ResourceKeySize: uint64(size),
+		}
+		parsed, reason := ValidateResourceEnvelopeBody(body)
+		if reason == "" {
+			if parsed == nil || !parsed.HasID || !parsed.HasKind || !parsed.HasSize {
+				t.Fatal("valid body missing fields")
+			}
+			if parsed.ToMap() == nil {
+				t.Fatal("valid body map")
+			}
+		}
+	})
+}

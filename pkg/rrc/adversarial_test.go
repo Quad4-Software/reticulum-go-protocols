@@ -3,6 +3,7 @@ package rrc
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -623,5 +624,454 @@ func TestAdversarial_InvalidResourceEnvelopeRejected(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected invalid resource size ERROR")
+	}
+}
+
+func TestAdversarial_HelloRequiredBeforeJoin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42912, HubConfig{
+		Limits: HubLimits{RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	sess := dialMeshPreHello(t, m, 'A', func(env *Envelope) {
+		if env.Type == TypeError {
+			if s, ok := BodyAsString(env.Body); ok {
+				select {
+				case errCh <- s:
+				default:
+				}
+			}
+		}
+	})
+	if err := sess.sendType(TypeJoin, "#lobby", nil, "early"); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "hello")
+}
+
+func TestAdversarial_MsgWithoutJoinRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42922, HubConfig{
+		Limits: HubLimits{MaxMsgBodyBytes: 64, RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	if err := c.sess.sendType(TypeMsg, "#ghost", "nope", c.sess.getNick()); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "member")
+}
+
+func TestAdversarial_RateLimitTriggersError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42932, HubConfig{
+		Limits: HubLimits{RateLimitMsgsPerMinute: 2, MaxMsgBodyBytes: 64},
+	})
+	errCh := make(chan string, 1)
+	joined := make(chan struct{}, 1)
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnJoined: func(room string, _ [][]byte, _ *Envelope) {
+				if room == "#rate" {
+					select {
+					case joined <- struct{}{}:
+					default:
+					}
+				}
+			},
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	if err := c.Join("#rate"); err != nil {
+		t.Fatal(err)
+	}
+	waitJoined(t, joined, "A")
+	for range 2 {
+		if err := c.SendMsg("#rate", "x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitError(t, errCh, "rate")
+}
+
+func TestAdversarial_RoomNameTooLongRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42942, HubConfig{
+		Limits: HubLimits{MaxRoomNameBytes: 8, RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	longRoom := "#" + strings.Repeat("x", 64)
+	if err := c.Join(longRoom); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "room")
+}
+
+func TestAdversarial_RoomLimitPerSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42952, HubConfig{
+		Limits: HubLimits{MaxRoomsPerSession: 2, RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	joined := make(chan string, 2)
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnJoined: func(room string, _ [][]byte, _ *Envelope) {
+				select {
+				case joined <- room:
+				default:
+				}
+			},
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	if err := c.Join("#one"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("join #one timeout")
+	}
+	if err := c.Join("#two"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("join #two timeout")
+	}
+	if err := c.Join("#three"); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "room limit")
+}
+
+func TestAdversarial_DirectNoticeWithRoomRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42962, HubConfig{
+		Limits: HubLimits{MaxMsgBodyBytes: 64, RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	a := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	b := dialMeshClient(t, m, 'B', ClientConfig{})
+	env := mustEnvelope(t, TypeNotice, a.sender)
+	env.Room = "#d"
+	env.HasRoom = true
+	env.Destination = append([]byte(nil), b.sender...)
+	env.HasDestination = true
+	env.Body = "bad"
+	env.HasBody = true
+	if err := a.sess.sendEnvelope(env); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "direct notice")
+}
+
+func TestAdversarial_DirectNoticeUnknownDestRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42972, HubConfig{
+		Limits: HubLimits{MaxMsgBodyBytes: 64, RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	a := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	ghost := bytes.Repeat([]byte{0xde}, IdentityLength)
+	env := mustEnvelope(t, TypeNotice, a.sender)
+	env.Destination = ghost
+	env.HasDestination = true
+	env.Body = "dm"
+	env.HasBody = true
+	if err := a.sess.sendEnvelope(env); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "destination")
+}
+
+func TestAdversarial_ActionSenderIsAuthenticatedPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42982, HubConfig{
+		Limits: HubLimits{MaxMsgBodyBytes: 64, RateLimitMsgsPerMinute: 60},
+	})
+	got := make(chan *Envelope, 1)
+	joinedA := make(chan struct{}, 1)
+	joinedB := make(chan struct{}, 1)
+	a := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnJoined: func(room string, _ [][]byte, _ *Envelope) {
+				if room == "#act" {
+					select {
+					case joinedA <- struct{}{}:
+					default:
+					}
+				}
+			},
+		},
+	})
+	b := dialMeshClient(t, m, 'B', ClientConfig{
+		Handlers: ClientHandlers{
+			OnJoined: func(room string, _ [][]byte, _ *Envelope) {
+				if room == "#act" {
+					select {
+					case joinedB <- struct{}{}:
+					default:
+					}
+				}
+			},
+			OnAction: func(env *Envelope) {
+				select {
+				case got <- env:
+				default:
+				}
+			},
+		},
+	})
+	if err := a.Join("#act"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Join("#act"); err != nil {
+		t.Fatal(err)
+	}
+	waitJoined(t, joinedA, "A")
+	waitJoined(t, joinedB, "B")
+	fake := bytes.Repeat([]byte{0xfa}, IdentityLength)
+	env := mustEnvelope(t, TypeAction, fake)
+	env.Room = "#act"
+	env.HasRoom = true
+	env.Body = "waves"
+	env.HasBody = true
+	if err := a.sess.sendEnvelope(env); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case fwd := <-got:
+		if bytes.Equal(fwd.Sender, fake) {
+			t.Fatal("action sender spoofed")
+		}
+		if !bytes.Equal(fwd.Sender, a.sender) {
+			t.Fatalf("sender=%x", fwd.Sender)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for ACTION")
+	}
+}
+
+func TestAdversarial_PolicyDenyJoin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 42992, HubConfig{
+		Policy: &denyPolicy{joinErr: errors.New("access denied")},
+		Limits: HubLimits{RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	if err := c.Join("#locked"); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "denied")
+}
+
+func TestAdversarial_PolicyDenyContent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 43002, HubConfig{
+		Policy: &denyPolicy{contentErr: errors.New("content blocked")},
+		Limits: HubLimits{MaxMsgBodyBytes: 64, RateLimitMsgsPerMinute: 60},
+	})
+	errCh := make(chan string, 1)
+	joined := make(chan struct{}, 1)
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnJoined: func(room string, _ [][]byte, _ *Envelope) {
+				if room == "#pol" {
+					select {
+					case joined <- struct{}{}:
+					default:
+					}
+				}
+			},
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	if err := c.Join("#pol"); err != nil {
+		t.Fatal(err)
+	}
+	waitJoined(t, joined, "A")
+	if err := c.SendMsg("#pol", "blocked"); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "blocked")
+}
+
+func TestAdversarial_ResourceOversizeRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	errCh := make(chan string, 1)
+	m := newTestMesh(t, 43012, HubConfig{
+		EnableResourceTransfer: true,
+		MaxResourceBytes:       64,
+		Limits:                 HubLimits{RateLimitMsgsPerMinute: 60},
+	})
+	c := dialMeshClient(t, m, 'A', ClientConfig{
+		Handlers: ClientHandlers{
+			OnError: func(env *Envelope) {
+				if s, ok := BodyAsString(env.Body); ok {
+					select {
+					case errCh <- s:
+					default:
+					}
+				}
+			},
+		},
+	})
+	body := &ResourceEnvelopeBody{
+		ID: []byte{1, 2, 3, 4}, HasID: true,
+		Kind: ResourceKindBlob, HasKind: true,
+		Size: 128, HasSize: true,
+	}
+	if err := c.SendResourceEnvelope("", body); err != nil {
+		t.Fatal(err)
+	}
+	waitError(t, errCh, "large")
+}
+
+type identRejectPolicy struct {
+	denyPolicy
+}
+
+func (identRejectPolicy) OnIdentified([]byte) error {
+	return errors.New("banned identity")
+}
+
+func TestAdversarial_IdentRejectBlocksSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	m := newTestMesh(t, 43032, HubConfig{
+		Policy: &identRejectPolicy{},
+		Limits: HubLimits{RateLimitMsgsPerMinute: 60},
+	})
+	_, err := Dial(m.trA, m.idA, m.hubHash, ClientConfig{DialTimeout: 5 * time.Second, WelcomeTimeout: 2 * time.Second})
+	if err == nil {
+		t.Fatal("banned identity must not complete dial")
+	}
+}
+
+func TestAdversarial_BadPacketRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("adversarial mesh skipped in -short")
+	}
+	badCount := 0
+	m := newTestMesh(t, 43022, HubConfig{
+		Limits: HubLimits{RateLimitMsgsPerMinute: 60},
+		OnBadPacket: func() {
+			badCount++
+		},
+	})
+	c := dialMeshClient(t, m, 'A', ClientConfig{})
+	if err := c.sess.lnk.SendPacket([]byte{0xff, 0xfe, 0xfd}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for badCount == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("hub did not report bad packet")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

@@ -27,6 +27,7 @@ on:
           - examples
           - security
           - interop
+          - build
         default: all
 
 concurrency:
@@ -176,6 +177,113 @@ jobs:
       - name: Verify workspace clean
         run: sh scripts/ci/verify-workspace-clean.sh
 
+  build:
+    name: Build (${{ matrix.goos }}, ${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","build","check"]'), inputs.suite)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: 386}
+          - {goos: linux, goarch: arm64}
+          - {goos: linux, goarch: arm}
+          - {goos: linux, goarch: riscv64}
+          - {goos: linux, goarch: ppc64le}
+          - {goos: linux, goarch: s390x}
+          - {goos: linux, goarch: loong64}
+          - {goos: linux, goarch: mips64le}
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+          - {goos: windows, goarch: amd64}
+          - {goos: windows, goarch: 386}
+          - {goos: windows, goarch: arm64}
+          - {goos: freebsd, goarch: amd64}
+          - {goos: freebsd, goarch: arm64}
+          - {goos: freebsd, goarch: 386}
+          - {goos: freebsd, goarch: arm}
+          - {goos: openbsd, goarch: amd64}
+          - {goos: openbsd, goarch: arm64}
+          - {goos: openbsd, goarch: 386}
+          - {goos: openbsd, goarch: arm}
+          - {goos: openbsd, goarch: riscv64}
+          - {goos: openbsd, goarch: ppc64}
+          - {goos: netbsd, goarch: amd64}
+          - {goos: netbsd, goarch: arm64}
+          - {goos: netbsd, goarch: 386}
+          - {goos: netbsd, goarch: arm}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Build gorrcd
+        env:
+          GOARM: ${{ matrix.goarch == 'arm' && '6' || '' }}
+          VERSION: dev
+        run: sh scripts/ci/build-gorrcd.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bin
+
+      - name: Build golxmd
+        env:
+          GOARM: ${{ matrix.goarch == 'arm' && '6' || '' }}
+          VERSION: dev
+        run: sh scripts/ci/build-golxmd.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bin
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  qemu-smoke:
+    name: QEMU smoke (${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","build"]'), inputs.suite)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {goarch: "386", qemu: qemu-i386-static}
+          - {goarch: arm, qemu: qemu-arm-static, goarm: "6"}
+          - {goarch: riscv64, qemu: qemu-riscv64-static}
+          - {goarch: ppc64le, qemu: qemu-ppc64le-static}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Install qemu-user-static
+        env:
+          QEMU_BIN: ${{ matrix.qemu }}
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user-static
+          command -v "${QEMU_BIN}"
+          "${QEMU_BIN}" --version | head -1
+
+      - name: Build and run --version
+        env:
+          GOARM: ${{ matrix.goarm || '' }}
+        run: |
+          sh scripts/ci/qemu-gorrcd-smoke.sh "${{ matrix.goarch }}" "${{ matrix.qemu }}" bin
+          sh scripts/ci/qemu-golxmd-smoke.sh "${{ matrix.goarch }}" "${{ matrix.qemu }}" bin
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
   security:
     name: Security (gosec)
     runs-on: ubuntu-latest
@@ -215,6 +323,15 @@ jobs:
             suite: interop-lxmf
           - target: rrc
             suite: interop-rrc
+          - target: lxst
+            suite: interop-lxst
+            extra_setup: |
+              sudo apt-get update -qq
+              sudo apt-get install -y cmake libcodec2-dev
+              python3 -m venv .venv-lxst
+              .venv-lxst/bin/pip install -U pip
+              .venv-lxst/bin/pip install "rns" "lxst==0.5.1" numpy pycodec2
+            lxst_python: ${{ github.workspace }}/.venv-lxst/bin/python
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -230,19 +347,120 @@ jobs:
         run: sh scripts/ci/setup-uv.sh "$UV_VERSION"
 
       - name: Clone reference repos
+        if: matrix.target != 'lxst'
         env:
           LXMF_REF_REV: ${{ env.LXMF_REF_REV }}
           RRC_REF_REV: ${{ env.RRC_REF_REV }}
         run: sh scripts/ci/clone-refs.sh
 
+      - name: LXST interop setup
+        if: matrix.extra_setup != ''
+        run: ${{ matrix.extra_setup }}
+
       - name: Run interop
         env:
           INTEROP_SUITE: ${{ matrix.suite }}
           CI_REQUIRE_INTEROP: "1"
+          REQUIRE_LXST: ${{ matrix.target == 'lxst' && '1' || '' }}
+          LXST_PYTHON: ${{ matrix.lxst_python || '' }}
         run: sh scripts/ci/run-suite.sh "$INTEROP_SUITE"
 
       - name: Verify workspace clean
         run: sh scripts/ci/verify-workspace-clean.sh
+
+  bindings:
+    name: Bindings (${{ matrix.lang }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","test","check"]'), inputs.suite)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lang: python
+            setup: ""
+          - lang: rust
+            setup: ""
+          - lang: java
+            setup: ""
+          - lang: lua
+            setup: |
+              sudo apt-get update
+              sudo apt-get install -y luajit
+          - lang: c
+            setup: ""
+          - lang: cpp
+            setup: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        run: sh scripts/ci/setup-ci-toolchain.sh
+
+      - name: Setup language extras
+        if: matrix.setup != ''
+        run: ${{ matrix.setup }}
+
+      - name: Run binding tests
+        run: sh scripts/ci/run-${{ matrix.lang }}-bindings.sh
+
+      - name: Verify workspace clean
+        run: sh scripts/ci/verify-workspace-clean.sh
+
+  bindings-codec:
+    name: Bindings codec (mf/lxmf/lxst)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","test","check"]'), inputs.suite)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - run: sh scripts/ci/setup-ci-toolchain.sh
+      - run: sh scripts/ci/run-codec-bindings.sh
+      - run: sh scripts/ci/verify-workspace-clean.sh
+
+  bindings-hub-client:
+    name: Bindings hub-client
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","test","check"]'), inputs.suite)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - run: sh scripts/ci/setup-ci-toolchain.sh
+      - run: sh scripts/ci/run-hub-client-bindings.sh
+      - run: sh scripts/ci/verify-workspace-clean.sh
+
+  lxst-build:
+    name: LXST CLI build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all","build","check","test"]'), inputs.suite)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - run: sh scripts/ci/setup-ci-toolchain.sh
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y cmake curl
+      - name: Build rnphone and rgesp-dial
+        env:
+          CGO_ENABLED: "1"
+        run: sh scripts/ci/build-rnphone.sh linux amd64 bin
+      - run: sh scripts/ci/verify-workspace-clean.sh
 
   test-full:
     name: Full test

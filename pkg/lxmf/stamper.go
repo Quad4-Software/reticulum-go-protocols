@@ -106,6 +106,35 @@ func StampValid(stamp []byte, targetCost int, workblock []byte) bool {
 	return bytes.Compare(sum[:], target[:]) <= 0
 }
 
+// PNStampEntry is one validated propagation stamp batch entry.
+type PNStampEntry struct {
+	TransientID []byte
+	LxmData     []byte
+	Value       int
+	Stamp       []byte
+}
+
+// ValidatePNStamps validates each transient message and returns entries meeting targetCost.
+func ValidatePNStamps(messages [][]byte, targetCost int) []PNStampEntry {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]PNStampEntry, 0, len(messages))
+	for _, transientData := range messages {
+		tid, lxm, value, stamp := ValidatePNStamp(transientData, targetCost)
+		if tid == nil {
+			continue
+		}
+		out = append(out, PNStampEntry{
+			TransientID: append([]byte(nil), tid...),
+			LxmData:     lxm,
+			Value:       value,
+			Stamp:       stamp,
+		})
+	}
+	return out
+}
+
 // ValidatePNStamp checks PN transient data (LXMF bytes + 32-byte stamp) and returns ids and stamp on success.
 func ValidatePNStamp(transientData []byte, targetCost int) (transientID, lxmData []byte, value int, stamp []byte) {
 	if len(transientData) <= Overhead+StampSize {
@@ -170,7 +199,7 @@ func GenerateStamp(ctx context.Context, messageID []byte, stampCost, expandRound
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
+	for range workers {
 		wg.Go(func() {
 			candidate := make([]byte, StampSize)
 			h := sha256.New()

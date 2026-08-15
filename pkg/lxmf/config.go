@@ -209,10 +209,7 @@ func ParseConfig(r io.Reader) (Config, error) {
 
 	if section, ok := sections["logging"]; ok {
 		if v, ok := section["loglevel"]; ok {
-			cfg.Logging.Level = max(parseInt(v), LogCritical)
-			if cfg.Logging.Level > LogExtreme {
-				cfg.Logging.Level = LogExtreme
-			}
+			cfg.Logging.Level = min(max(parseInt(v), LogCritical), LogExtreme)
 		}
 	}
 
