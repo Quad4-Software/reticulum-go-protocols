@@ -4,6 +4,7 @@ package session_test
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	stdio "io"
 	"net"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
 	"quad4/reticulum-go-protocols/pkg/lxst/call"
+	"quad4/reticulum-go-protocols/pkg/lxst/phonebook"
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
 	"quad4/reticulum-go-protocols/pkg/lxst/session"
 	"quad4/reticulum-go/pkg/common"
@@ -53,6 +55,23 @@ func isolatedConfig(t *testing.T) *common.ReticulumConfig {
 	cfg.InMemoryKnownDestinations = true
 	cfg.ConfigPath = t.TempDir() + "/config"
 	return cfg
+}
+
+func waitRinging(t *testing.T, ctx context.Context, s *session.Session) *call.Call {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			t.Fatal(err)
+		}
+		c := s.Active()
+		if c != nil && c.Incoming() && c.State() == call.StateRinging {
+			return c
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("no ringing call")
+	return nil
 }
 
 func answerWhenRinging(ctx context.Context, s *session.Session) {
@@ -132,8 +151,23 @@ func TestParseHash(t *testing.T) {
 }
 
 func TestParseHashRejectsShort(t *testing.T) {
-	if _, err := session.ParseHash("abcd"); err == nil {
-		t.Fatal("expected error")
+	_, err := session.ParseHash("abcd")
+	if !errors.Is(err, session.ErrInvalidHash) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParseHashRejectsJunk(t *testing.T) {
+	_, err := session.ParseHash("zzzz")
+	if !errors.Is(err, session.ErrInvalidHash) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParseHashRejectsEmpty(t *testing.T) {
+	_, err := session.ParseHash(" <> ")
+	if !errors.Is(err, session.ErrInvalidHash) {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -335,4 +369,210 @@ func TestRaceSessionPCM(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+func TestInfoIdle(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	info := a.Info()
+	if info.State != call.StateIdle || info.StateName != "idle" {
+		t.Fatalf("info %+v", info)
+	}
+	if info.DestHash == "" || info.LocalHash == "" {
+		t.Fatal("missing hashes")
+	}
+	if info.Audio != "host" {
+		t.Fatalf("audio %q", info.Audio)
+	}
+	if info.ProfileName != "mq" {
+		t.Fatalf("profile %q", info.ProfileName)
+	}
+	if info.Aspect != "lxst.telephony" {
+		t.Fatalf("aspect %q", info.Aspect)
+	}
+	if info.AllowPolicy != "all" {
+		t.Fatalf("allow %q", info.AllowPolicy)
+	}
+	if info.Announced {
+		t.Fatal("caller announced")
+	}
+	if info.String() == "" {
+		t.Fatal("empty info string")
+	}
+}
+
+func TestInfoAnnouncedAndAllow(t *testing.T) {
+	_, b, _ := pairedSessions(t)
+	info := b.Info()
+	if !info.Announced {
+		t.Fatal("callee not announced")
+	}
+	b.SetAllowed(phonebook.AllowNone, nil, nil)
+	if b.Info().AllowPolicy != "none" {
+		t.Fatalf("allow %q", b.Info().AllowPolicy)
+	}
+}
+
+func TestAnswerWithoutCall(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	err := a.Answer(context.Background())
+	if !errors.Is(err, call.ErrNotRinging) {
+		t.Fatalf("got %v", err)
+	}
+	if a.LastError() == nil {
+		t.Fatal("last error not stored")
+	}
+}
+
+func TestDialNilRemote(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	_, err := a.Dial(context.Background(), nil)
+	if !errors.Is(err, call.ErrRemoteRequired) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSwitchUnknownName(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	if err := a.SwitchProfileName("bogus"); !errors.Is(err, session.ErrUnknownName) {
+		t.Fatalf("profile %v", err)
+	}
+	if err := a.SwitchModeName("bogus"); !errors.Is(err, session.ErrUnknownName) {
+		t.Fatalf("mode %v", err)
+	}
+	if err := a.SwitchProfileName("ulbw"); err != session.ErrNoCall {
+		t.Fatalf("known profile %v", err)
+	}
+}
+
+func TestAnswerHash(t *testing.T) {
+	a, b, idB := pairedSessions(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := a.Dial(ctx, idB)
+		errCh <- err
+	}()
+	waitRinging(t, ctx, b)
+	junk := hex.EncodeToString(make([]byte, proto.IdentityHashLen))
+	if err := b.AnswerHash(ctx, junk); !errors.Is(err, session.ErrFingerprint) {
+		t.Fatalf("mismatch %v", err)
+	}
+	if err := b.AnswerHash(ctx, b.Info().RemoteHash); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func TestMuteWithoutCall(t *testing.T) {
+	a, _, _ := pairedSessions(t)
+	if err := a.MuteTX(true); err != session.ErrNoCall {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestStateAndErrorCallbacks(t *testing.T) {
+	tA := transport.NewTransport(isolatedConfig(t))
+	tB := transport.NewTransport(isolatedConfig(t))
+	if err := tA.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ifA := newPairIface("a")
+	ifB := newPairIface("b")
+	ifA.peer = ifB
+	ifB.peer = ifA
+	if err := tA.RegisterInterface("a", ifA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tB.RegisterInterface("b", ifB); err != nil {
+		t.Fatal(err)
+	}
+	idA, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := identity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := make(chan string, 16)
+	logs := make(chan string, 32)
+	alice, err := session.Open(session.Config{
+		Transport: tA,
+		Identity:  idA,
+		Log: func(event string, kv ...string) {
+			select {
+			case logs <- event:
+			default:
+			}
+		},
+		Events: session.Events{
+			OnState: func(info session.Info) {
+				select {
+				case states <- info.StateName:
+				default:
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := session.Open(session.Config{Transport: tB, Identity: idB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = alice.Close()
+		_ = bob.Close()
+	})
+	if err := bob.Announce(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	go answerWhenRinging(ctx, bob)
+	if _, err := alice.Dial(ctx, idB); err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if alice.Info().StateName != "active" {
+		t.Fatalf("state %s", alice.Info().StateName)
+	}
+	if err := alice.Hangup(); err != nil {
+		t.Fatal(err)
+	}
+	if alice.LastReason() == "" {
+		t.Fatal("missing end reason")
+	}
+	sawDial := false
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case ev := <-logs:
+			if ev == "dial" || ev == "ended" || ev == "open" {
+				sawDial = true
+			}
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if !sawDial {
+		t.Fatal("missing log events")
+	}
+	select {
+	case <-states:
+	default:
+		t.Fatal("missing state callback")
+	}
 }

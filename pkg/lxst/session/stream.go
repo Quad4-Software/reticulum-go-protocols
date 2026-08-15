@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	stdio "io"
 	"sync"
@@ -12,13 +13,15 @@ import (
 	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
 )
 
+// Attach copies host PCM over rw. The stream is local, not a mesh hop.
 func (s *Session) Attach(ctx context.Context, rw stdio.ReadWriter) error {
 	if s.host == nil {
 		return ErrNoHost
 	}
 	if rw == nil {
-		return fmt.Errorf("missing stream")
+		return ErrNoStream
 	}
+	s.note("attach")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -40,7 +43,11 @@ func (s *Session) Attach(ctx context.Context, rw stdio.ReadWriter) error {
 		cancel()
 	}
 	wg.Wait()
-	return first
+	if first == nil || errors.Is(first, context.Canceled) || errors.Is(first, context.DeadlineExceeded) {
+		s.note("attach_done")
+		return first
+	}
+	return s.fail(fmt.Errorf("%w: %v", ErrAttach, first))
 }
 
 func (s *Session) readCapture(ctx context.Context, r stdio.Reader) error {
@@ -54,7 +61,7 @@ func (s *Session) readCapture(ctx context.Context, r stdio.Reader) error {
 		}
 		n := binary.LittleEndian.Uint32(hdr)
 		if n == 0 || n > io.MaxPCMBytes {
-			return fmt.Errorf("pcm frame length %d", n)
+			return fmt.Errorf("%w: frame length %d", ErrAttach, n)
 		}
 		buf := make([]byte, n)
 		if err := readFull(ctx, r, buf); err != nil {

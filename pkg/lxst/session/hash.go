@@ -19,12 +19,15 @@ func ParseHash(s string) ([]byte, error) {
 	if strings.HasPrefix(s, "<") && strings.HasSuffix(s, ">") {
 		s = s[1 : len(s)-1]
 	}
+	if s == "" {
+		return nil, fmt.Errorf("%w: empty", ErrInvalidHash)
+	}
 	raw, err := hex.DecodeString(s)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidHash, err)
 	}
 	if len(raw) != proto.IdentityHashLen && len(raw) != proto.DestHashLen {
-		return nil, fmt.Errorf("hash length %d", len(raw))
+		return nil, fmt.Errorf("%w: length %d", ErrInvalidHash, len(raw))
 	}
 	return raw, nil
 }

@@ -120,6 +120,10 @@ func TestHostDropOldest(t *testing.T) {
 	if len(got) != 1 || got[0] != 8 {
 		t.Fatalf("oldest dropped, got %v", got)
 	}
+	st := h.Stats()
+	if st.CaptureDropped != 8 {
+		t.Fatalf("dropped %d", st.CaptureDropped)
+	}
 }
 
 func TestHostBytes(t *testing.T) {

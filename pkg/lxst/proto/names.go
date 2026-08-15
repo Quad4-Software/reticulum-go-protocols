@@ -12,8 +12,13 @@ var profileByName = map[string]int{
 	"ull":  ProfileLatencyUltraLow,
 }
 
+func LookupProfile(name string) (int, bool) {
+	p, ok := profileByName[name]
+	return p, ok
+}
+
 func ProfileFromName(name string) int {
-	if p, ok := profileByName[name]; ok {
+	if p, ok := LookupProfile(name); ok {
 		return p
 	}
 	return DefaultProfile
@@ -27,8 +32,13 @@ var modeByName = map[string]int{
 	"ptt":  ModeHalfDuplex,
 }
 
+func LookupMode(name string) (int, bool) {
+	m, ok := modeByName[name]
+	return m, ok
+}
+
 func ModeFromName(name string) int {
-	if m, ok := modeByName[name]; ok {
+	if m, ok := LookupMode(name); ok {
 		return m
 	}
 	return DefaultMode
@@ -40,6 +50,29 @@ func ModeName(mode int) string {
 		return "full"
 	case ModeHalfDuplex:
 		return "half"
+	default:
+		return "unknown"
+	}
+}
+
+func ProfileName(profile int) string {
+	switch profile {
+	case ProfileBandwidthUltraLow:
+		return "ulbw"
+	case ProfileBandwidthVeryLow:
+		return "vlbw"
+	case ProfileBandwidthLow:
+		return "lbw"
+	case ProfileQualityMedium:
+		return "mq"
+	case ProfileQualityHigh:
+		return "hq"
+	case ProfileQualityMax:
+		return "shq"
+	case ProfileLatencyLow:
+		return "ll"
+	case ProfileLatencyUltraLow:
+		return "ull"
 	default:
 		return "unknown"
 	}

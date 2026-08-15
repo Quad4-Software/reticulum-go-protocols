@@ -66,6 +66,12 @@ func TestCallStateIdle(t *testing.T) {
 	if c.State() != call.StateIdle {
 		t.Fatalf("expected idle")
 	}
+	if c.State().String() != "idle" {
+		t.Fatalf("state name %q", c.State().String())
+	}
+	if call.StateActive.String() != "active" {
+		t.Fatal("active name")
+	}
 }
 
 func TestGoGoCallOverPairedInterface(t *testing.T) {

@@ -112,8 +112,9 @@ func main() {
 		tone[i] = 8000
 	}
 	_ = alice.PushPCM(tone)
-	fmt.Println("session example: call active with host pcm")
+	fmt.Println(alice.Info().String())
 	_ = alice.Hangup()
+	fmt.Println("ended", alice.LastReason())
 }
 
 func isolatedConfig() *common.ReticulumConfig {

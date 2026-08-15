@@ -33,3 +33,30 @@ func TestModeName(t *testing.T) {
 		t.Fatal("half name")
 	}
 }
+
+func TestProfileName(t *testing.T) {
+	if proto.ProfileName(proto.ProfileQualityMedium) != "mq" {
+		t.Fatal("mq name")
+	}
+	if proto.ProfileName(proto.ProfileFromName("ulbw")) != "ulbw" {
+		t.Fatal("ulbw roundtrip")
+	}
+	if proto.ProfileName(0) != "unknown" {
+		t.Fatal("unknown profile")
+	}
+}
+
+func TestLookupRejectsUnknown(t *testing.T) {
+	if _, ok := proto.LookupProfile("bogus"); ok {
+		t.Fatal("profile")
+	}
+	if _, ok := proto.LookupMode("bogus"); ok {
+		t.Fatal("mode")
+	}
+	if _, ok := proto.LookupProfile("ulbw"); !ok {
+		t.Fatal("ulbw")
+	}
+	if _, ok := proto.LookupMode("ptt"); !ok {
+		t.Fatal("ptt")
+	}
+}

@@ -46,6 +46,23 @@ const (
 	StateEnded
 )
 
+func (s State) String() string {
+	switch s {
+	case StateIdle:
+		return "idle"
+	case StateRinging:
+		return "ringing"
+	case StateConnecting:
+		return "connecting"
+	case StateActive:
+		return "active"
+	case StateEnded:
+		return "ended"
+	default:
+		return "unknown"
+	}
+}
+
 type Events struct {
 	OnRinging  func(*Call)
 	OnAnswered func(*Call)
@@ -417,6 +434,10 @@ func (c *Call) MuteTX(muted bool) error {
 
 func (c *Call) MutedTX() bool {
 	return c.muted.Load()
+}
+
+func (c *Call) MutedRX() bool {
+	return c.mutedRX.Load()
 }
 
 func (c *Call) MuteRX(muted bool) error {

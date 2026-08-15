@@ -25,6 +25,17 @@ type Host struct {
 	silence   []int16
 	onPlay    func([]int16)
 	playWake  chan struct{}
+	dropCap   uint64
+	dropPlay  uint64
+}
+
+type HostStats struct {
+	CaptureQueued   int
+	PlaybackQueued  int
+	CaptureDropped  uint64
+	PlaybackDropped uint64
+	FrameSize       int
+	Closed          bool
 }
 
 func NewHost() *Host {
@@ -95,6 +106,7 @@ func (h *Host) WritePCM(pcm []int16) error {
 	if len(h.play) >= h.maxQueue {
 		h.play[0] = nil
 		h.play = h.play[1:]
+		h.dropPlay++
 	}
 	h.play = append(h.play, queued)
 	cb := h.onPlay
@@ -135,6 +147,7 @@ func (h *Host) Push(pcm []int16) error {
 	if len(h.capture) >= h.maxQueue {
 		h.capture[0] = nil
 		h.capture = h.capture[1:]
+		h.dropCap++
 	}
 	h.capture = append(h.capture, cp)
 	return nil
@@ -191,5 +204,18 @@ func (h *Host) signalPlay() {
 	select {
 	case h.playWake <- struct{}{}:
 	default:
+	}
+}
+
+func (h *Host) Stats() HostStats {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return HostStats{
+		CaptureQueued:   len(h.capture),
+		PlaybackQueued:  len(h.play),
+		CaptureDropped:  h.dropCap,
+		PlaybackDropped: h.dropPlay,
+		FrameSize:       h.frameSize,
+		Closed:          h.closed,
 	}
 }
