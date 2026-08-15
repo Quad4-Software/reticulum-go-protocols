@@ -171,6 +171,7 @@ func TestPropagationControlStatsHandler(t *testing.T) {
 	if err := mesh.recvRouter.EnablePropagation(); err != nil {
 		t.Fatal(err)
 	}
+	mesh.recvRouter.controlAllow[peerKey(mesh.sendID.Hash())] = struct{}{}
 	resp := mesh.recvRouter.statsGetRequestHandler("", nil, nil, nil, mesh.sendID, 0)
 	stats, ok := resp.(map[string]any)
 	if !ok {

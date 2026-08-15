@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  CI_GO_VERSION: "1.26.5"
+  CI_GO_VERSION: "1.26.6"
   CI_TASK_VERSION: "3.46.3"
   CI_REVIVE_VERSION: "v1.15.0"
   CI_GOSEC_VERSION: "v2.24.5"
@@ -331,7 +331,7 @@ jobs:
               python3 -m venv .venv-lxst
               .venv-lxst/bin/pip install -U pip
               .venv-lxst/bin/pip install "rns" "lxst==0.5.1" numpy pycodec2
-            lxst_python: ${{ github.workspace }}/.venv-lxst/bin/python
+            lxst_python: .venv-lxst/bin/python
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -362,7 +362,7 @@ jobs:
           INTEROP_SUITE: ${{ matrix.suite }}
           CI_REQUIRE_INTEROP: "1"
           REQUIRE_LXST: ${{ matrix.target == 'lxst' && '1' || '' }}
-          LXST_PYTHON: ${{ matrix.lxst_python || '' }}
+          LXST_PYTHON: ${{ matrix.lxst_python && format('{0}/{1}', github.workspace, matrix.lxst_python) || '' }}
         run: sh scripts/ci/run-suite.sh "$INTEROP_SUITE"
 
       - name: Verify workspace clean

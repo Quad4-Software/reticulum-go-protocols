@@ -6,11 +6,11 @@ LIBS_ROOT="${2:-../Reticulum-Go-Projects}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-if true; then
+if [ "${CI:-}" != "true" ] && [ "${GOPROXY:-}" != "off" ]; then
 	go mod tidy
 	go mod vendor
 else
-	echo "sibling replace modules missing, keeping existing vendor/" >&2
+	echo "skipping go mod tidy and vendor"
 fi
 
 

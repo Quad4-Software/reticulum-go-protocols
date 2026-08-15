@@ -31,6 +31,7 @@ logs/
 
 # JSON assets and auto-generated exports
 *.json
+!pkg/lxmf/testdata/messaging_interop_fields.json
 
 # OS / Editor files
 .DS_Store

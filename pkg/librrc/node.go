@@ -77,7 +77,7 @@ func NodeStop(nodeHandle uint64) int {
 	if !rec.started {
 		return OK
 	}
-	rec.transport.Close()
+	_ = rec.transport.Close()
 	rec.started = false
 	return OK
 }
@@ -92,7 +92,7 @@ func NodeDestroy(nodeHandle uint64) int {
 	}
 	rec.ifaces = nil
 	if rec.started {
-		rec.transport.Close()
+		_ = rec.transport.Close()
 		rec.started = false
 	}
 	runtimeMu.Lock()

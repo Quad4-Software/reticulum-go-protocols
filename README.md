@@ -11,7 +11,7 @@ Go implementations of application protocols that run on [Reticulum-Go](https://g
 
 ## Requirements
 
-- Go 1.26.5
+- Go 1.26.6
 - [Reticulum-Go](https://github.com/Quad4-Software/Reticulum-Go)
 - [Task](https://taskfile.dev/) if you use the `task` targets below
 
