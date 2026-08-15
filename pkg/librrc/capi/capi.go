@@ -1,5 +1,6 @@
 //go:build cgo
 
+// #nosec G115
 package capi
 
 /*
