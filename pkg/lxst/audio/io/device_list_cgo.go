@@ -72,7 +72,7 @@ type DeviceInfo struct {
 func ListDevices() ([]DeviceInfo, error) {
 	const maxn = 64
 	buf := make([]C.rgesp_listed_dev, maxn)
-	n := int(C.rgesp_list_devices(&buf[0], cInt(maxn)))
+	n := int(C.rgesp_list_devices(&buf[0], C.int(maxn)))
 	if n < 0 {
 		return nil, nil
 	}
