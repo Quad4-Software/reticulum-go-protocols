@@ -132,13 +132,13 @@ func Dial(tr *transport.Transport, id *identity.Identity, hubHash []byte, cfg Cl
 		return nil, fmt.Errorf("identify: %w", err)
 	}
 
+	c.mu.Lock()
+	c.state = ClientAwaitingWelcome
+	c.mu.Unlock()
 	if err := c.sendHello(); err != nil {
 		lnk.Teardown()
 		return nil, err
 	}
-	c.mu.Lock()
-	c.state = ClientAwaitingWelcome
-	c.mu.Unlock()
 
 	select {
 	case env := <-welcomeCh:
@@ -191,7 +191,7 @@ func (c *Client) dispatch(env *Envelope, welcomeCh chan<- *Envelope) {
 
 	switch env.Type {
 	case TypeWelcome:
-		if state == ClientAwaitingWelcome {
+		if state == ClientConnected || state == ClientAwaitingWelcome {
 			select {
 			case welcomeCh <- env:
 			default:

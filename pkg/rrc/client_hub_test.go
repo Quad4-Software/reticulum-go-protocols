@@ -5,6 +5,41 @@ import (
 	"testing"
 )
 
+func TestClientDispatchWelcomeWhileConnected(t *testing.T) {
+	sender := make([]byte, IdentityLength)
+	env, err := NewEnvelope(TypeWelcome, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{state: ClientConnected, rooms: make(map[string]struct{})}
+	welcomeCh := make(chan *Envelope, 1)
+	c.dispatch(env, welcomeCh)
+	select {
+	case got := <-welcomeCh:
+		if got.Type != TypeWelcome {
+			t.Fatalf("type=%d", got.Type)
+		}
+	default:
+		t.Fatal("welcome dropped before awaiting state")
+	}
+}
+
+func TestClientDispatchWelcomeIgnoredWhenActive(t *testing.T) {
+	sender := make([]byte, IdentityLength)
+	env, err := NewEnvelope(TypeWelcome, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{state: ClientActive, rooms: make(map[string]struct{})}
+	welcomeCh := make(chan *Envelope, 1)
+	c.dispatch(env, welcomeCh)
+	select {
+	case <-welcomeCh:
+		t.Fatal("welcome accepted after session was already active")
+	default:
+	}
+}
+
 func TestClientRefuseBeforeWelcome(t *testing.T) {
 	c := &Client{
 		state: ClientAwaitingWelcome,

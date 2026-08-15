@@ -140,8 +140,8 @@ func (h *Hub) Start() {
 		if !ok || lnk == nil {
 			return
 		}
-		lnk.Start()
 		h.acceptLink(lnk)
+		lnk.Start()
 	})
 }
 
