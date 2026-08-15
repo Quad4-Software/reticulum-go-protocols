@@ -69,5 +69,8 @@ func (cfg Config) withDefaults() Config {
 	if cfg.AllowPolicy == 0 && len(cfg.Allowed) == 0 && cfg.AllowFunc == nil {
 		cfg.AllowPolicy = phonebook.AllowAll
 	}
+	if cfg.Device != nil {
+		cfg.UseAudio = true
+	}
 	return cfg
 }

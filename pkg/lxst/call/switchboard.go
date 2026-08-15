@@ -56,6 +56,8 @@ func (s *Switchboard) setAudio(cfg Config) {
 	s.cfg.Speaker = cfg.Speaker
 	s.cfg.Microphone = cfg.Microphone
 	s.cfg.Ringer = cfg.Ringer
+	s.cfg.Device = cfg.Device
+	s.cfg.UseAudio = cfg.UseAudio
 	s.mutex.Unlock()
 }
 

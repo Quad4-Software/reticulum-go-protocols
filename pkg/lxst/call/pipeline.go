@@ -48,8 +48,12 @@ func (c *Call) openPipelines() error {
 		return err
 	}
 
+	owned := true
 	var dev io.Device
-	if c.cfg.UseAudio {
+	if c.cfg.Device != nil {
+		dev = c.cfg.Device
+		owned = false
+	} else if c.cfg.UseAudio {
 		role := io.RoleCapture
 		if c.cfg.DuplexIO {
 			role = io.RoleDuplex
@@ -93,14 +97,17 @@ func (c *Call) openPipelines() error {
 		c.mutex.Unlock()
 		_ = enc.Close()
 		_ = dec.Close()
-		_ = dev.Close()
+		if owned {
+			_ = dev.Close()
+		}
 		return ErrNotActive
 	}
 	c.encoder = enc
 	c.decoder = dec
 	c.device = dev
+	c.deviceOwned = owned
 	c.recvKind = params.Codec
-	if c.cfg.UseAudio {
+	if c.cfg.UseAudio && owned {
 		c.skipLeft = io.DefaultSampleRate * captureSkipMs / 1000
 		c.easeTotal = io.DefaultSampleRate * captureEaseMs / 1000
 		c.easeLeft = c.easeTotal
@@ -567,6 +574,13 @@ func (c *Call) startBusyTone() {
 }
 
 func (c *Call) openPlayDevice(name string) io.Device {
+	if c.cfg.Device != nil {
+		if err := c.cfg.Device.Start(); err != nil {
+			debug.Log(debug.DebugInfo, "lxst host play device start failed", "error", err)
+			return nil
+		}
+		return keepOpen{Device: c.cfg.Device}
+	}
 	dev, err := io.Open(io.Options{Role: io.RolePlayback, Speaker: name})
 	if err != nil || dev == nil {
 		debug.Log(debug.DebugInfo, "lxst play device failed", "error", err)
@@ -579,3 +593,9 @@ func (c *Call) openPlayDevice(name string) io.Device {
 	}
 	return dev
 }
+
+type keepOpen struct {
+	io.Device
+}
+
+func (keepOpen) Close() error { return nil }

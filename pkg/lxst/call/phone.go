@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
 	"quad4/reticulum-go-protocols/pkg/lxst/proto"
 	"quad4/reticulum-go/pkg/destination"
 	"quad4/reticulum-go/pkg/identity"
@@ -87,6 +88,17 @@ func (p *Phone) SetMicrophone(name string) {
 func (p *Phone) SetRinger(name string) {
 	p.mutex.Lock()
 	p.cfg.Ringer = name
+	cfg := p.cfg
+	p.mutex.Unlock()
+	p.board.setAudio(cfg)
+}
+
+func (p *Phone) SetDevice(dev io.Device) {
+	p.mutex.Lock()
+	p.cfg.Device = dev
+	if dev != nil {
+		p.cfg.UseAudio = true
+	}
 	cfg := p.cfg
 	p.mutex.Unlock()
 	p.board.setAudio(cfg)

@@ -62,6 +62,7 @@ type Config struct {
 	Identity         *identity.Identity
 	Events           Events
 	UseAudio         bool
+	Device           io.Device
 	DuplexIO         bool
 	Profile          int
 	Mode             int
@@ -119,29 +120,30 @@ type Call struct {
 	dial     *tone.Source
 	limiter  *RateLimiter
 
-	mutex     sync.Mutex
-	sigMu     sync.Mutex
-	ringOnce  sync.Once
-	ringLoad  sync.Once
-	ringStop  chan struct{}
-	ringWG    sync.WaitGroup
-	ringClip  *opusfile.Clip
-	encoder   opus.Encoder
-	decoder   opus.Decoder
-	device    io.Device
-	params    proto.CodecParams
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	stateWait chan struct{}
-	recvWake  chan struct{}
-	txArm     chan struct{}
-	txArmed   atomic.Bool
-	opened    bool
-	started   bool
-	recvKind  byte
-	skipLeft  int
-	easeLeft  int
-	easeTotal int
+	mutex       sync.Mutex
+	sigMu       sync.Mutex
+	ringOnce    sync.Once
+	ringLoad    sync.Once
+	ringStop    chan struct{}
+	ringWG      sync.WaitGroup
+	ringClip    *opusfile.Clip
+	encoder     opus.Encoder
+	decoder     opus.Decoder
+	device      io.Device
+	deviceOwned bool
+	params      proto.CodecParams
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	stateWait   chan struct{}
+	recvWake    chan struct{}
+	txArm       chan struct{}
+	txArmed     atomic.Bool
+	opened      bool
+	started     bool
+	recvKind    byte
+	skipLeft    int
+	easeLeft    int
+	easeTotal   int
 }
 
 func DefaultConfig() Config {
@@ -615,6 +617,8 @@ func (c *Call) end(reason string) {
 	c.encoder = nil
 	c.decoder = nil
 	c.device = nil
+	owned := c.deviceOwned
+	c.deviceOwned = false
 	c.opened = false
 	c.started = false
 	c.mutex.Unlock()
@@ -624,7 +628,7 @@ func (c *Call) end(reason string) {
 	if decoder != nil {
 		_ = decoder.Close()
 	}
-	if device != nil {
+	if device != nil && owned {
 		_ = device.Close()
 	}
 	if l != nil && l.IsActive() {
