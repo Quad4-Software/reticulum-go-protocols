@@ -134,7 +134,7 @@ func (c *Call) startPipelines() error {
 		c.mutex.Unlock()
 		return ErrPipelinesClosed
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- stored on Call and invoked from end
 	c.cancel = cancel
 	c.started = true
 	c.wg.Add(3)
