@@ -284,6 +284,7 @@ func (t *Transport) loadPathTableFromDisk() {
 	if loaded > 0 {
 		debug.Log(debug.DebugInfo, "Loaded path table entries from storage", "count", loaded)
 	}
+	t.evictPathsIfNeededUnlocked(time.Now())
 }
 
 // activatePendingPathsForInterface must be called with t.mutex held.
@@ -309,6 +310,7 @@ func (t *Transport) activatePendingPathsForInterface(name string, iface common.N
 		t.pathStates[destKey] = StateUnknown
 	}
 	t.pendingPathEntries = remaining
+	t.evictPathsIfNeededUnlocked(time.Now())
 }
 
 // markPathTableDirty is called from the UpdatePath / cleanup hot paths.
@@ -318,6 +320,7 @@ func (t *Transport) markPathTableDirty() {
 	if t.pathPersistMemory.Load() || t.pathPersistDisabled.Load() {
 		return
 	}
+	t.pathPersistGen.Add(1)
 	t.pathPersistDirty.Store(true)
 }
 
@@ -343,6 +346,8 @@ func (t *Transport) savePathTable(force bool) {
 		return
 	}
 	defer t.pathPersistSaving.Unlock()
+
+	gen := t.pathPersistGen.Load()
 
 	t.mutex.RLock()
 	serialised := make([]any, 0, len(t.paths))
@@ -390,7 +395,10 @@ func (t *Transport) savePathTable(force bool) {
 		t.disablePathPersistence(err)
 		return
 	}
-	t.pathPersistDirty.Store(false)
+	// Only clear dirty when no mutations landed after the snapshot gen.
+	if t.pathPersistGen.Load() == gen {
+		t.pathPersistDirty.Store(false)
+	}
 	debug.Log(debug.DebugVerbose, "Saved path table to storage", "entries", len(serialised))
 }
 

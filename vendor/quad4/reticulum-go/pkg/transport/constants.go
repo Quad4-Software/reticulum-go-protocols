@@ -10,8 +10,31 @@ const (
 	PathRequestTTL  = 300
 	AnnounceTimeout = 15
 
+	// PathRequestTimeout is the default client path-request wait in seconds
+	// (Python Transport.PATH_REQUEST_TIMEOUT).
+	PathRequestTimeout = 15
+
+	// PathExchangeBytes is a typical path-request plus path-response size
+	// including a small IFAC. Used to size cold path waits on slow radios.
+	PathExchangeBytes = 240
+
+	// PathWindowMarginSec is added after the two-way airtime estimate.
+	PathWindowMarginSec = 10
+
 	// PathfinderE is path table lifetime in seconds (Python PATHFINDER_E).
 	PathfinderE = 60 * 60 * 24 * 7
+
+	// KnownDestinationsInterval is how often known destinations are cleaned
+	// (Python known_destinations_interval).
+	KnownDestinationsInterval = 5 * time.Minute
+
+	// MgmtAnnounceInterval is how often management destinations such as
+	// rnstransport.remote.management are re-announced (Python 2 hours).
+	MgmtAnnounceInterval = 2 * time.Hour
+
+	// MgmtAnnounceFirstDelay is the wait before the first management announce
+	// after start (Python last_mgmt_announce offset of 15 seconds).
+	MgmtAnnounceFirstDelay = 15 * time.Second
 
 	// APPathTime is path lifetime for Access Point mode interfaces.
 	APPathTime = 24 * time.Hour
@@ -20,7 +43,9 @@ const (
 	RoamingPathTime = 6 * time.Hour
 
 	// HashlistMaxSize caps the in-memory packet hash loop filter
-	// (Python Transport.hashlist_maxsize).
+	// (Python Transport.hashlist_maxsize). Prefer
+	// common.DefaultMaxPacketHashlist / EffectiveMaxPacketHashlist for
+	// runtime sizing. This constant remains the absolute ceiling default.
 	HashlistMaxSize = 1_000_000
 
 	// ReverseTimeout is how long reverse-table proof return paths are kept.

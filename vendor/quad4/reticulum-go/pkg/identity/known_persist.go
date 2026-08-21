@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"quad4/msgpack/v5/pkg/msgpack"
 	"quad4/reticulum-go/internal/storage"
@@ -25,6 +26,7 @@ var (
 	knownPersistMemory   atomic.Bool
 	knownPersistDisabled atomic.Bool
 	knownPersistDirty    atomic.Bool
+	knownPersistGen      atomic.Uint64
 	knownPersistSaving   sync.Mutex
 )
 
@@ -33,10 +35,12 @@ var (
 // touching the knownDestinations map, keeping the parser fuzzable and
 // unit-testable in isolation.
 type knownDestRecord struct {
-	destHash  []byte
-	publicKey []byte
-	packetRaw []byte
-	appData   []byte
+	destHash     []byte
+	publicKey    []byte
+	packetRaw    []byte
+	appData      []byte
+	rememberedAt float64
+	lastUsed     float64
 }
 
 // decodeKnownDestinations parses a known_destinations snapshot. Both
@@ -77,16 +81,40 @@ func decodeKnownDestinations(data []byte) (records []knownDestRecord, skipped in
 		if packetHash, ok := entry[1].([]byte); ok && len(packetHash) > 0 {
 			packetRaw = append([]byte(nil), packetHash...)
 		}
+		rememberedAt := asFloat64(entry[0])
+		lastUsed := float64(0)
+		if len(entry) >= 5 {
+			lastUsed = asFloat64(entry[4])
+		}
 
 		records = append(records, knownDestRecord{
-			destHash:  destHash,
-			publicKey: append([]byte(nil), publicKey...),
-			packetRaw: packetRaw,
-			appData:   appData,
+			destHash:     destHash,
+			publicKey:    append([]byte(nil), publicKey...),
+			packetRaw:    packetRaw,
+			appData:      appData,
+			rememberedAt: rememberedAt,
+			lastUsed:     lastUsed,
 		})
 	}
 
 	return records, skipped, nil
+}
+
+func asFloat64(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case uint64:
+		return float64(n)
+	default:
+		return 0
+	}
 }
 
 // resolveDestHashKey accepts either a hex-encoded key (native on-disk
@@ -114,6 +142,7 @@ func InitKnownDestinationsPersistence(configPath string, inMemory bool) {
 	knownPersistMemory.Store(inMemory)
 	knownPersistDisabled.Store(false)
 	knownPersistDirty.Store(false)
+	knownPersistGen.Store(0)
 
 	if configPath == "" && os.Getenv("RETICULUM_STORAGE_PATH") == "" {
 		// No config path was resolved: this is either ad-hoc/library use or
@@ -134,6 +163,9 @@ func InitKnownDestinationsPersistence(configPath string, inMemory bool) {
 		knownPersistMemory.Store(true)
 		knownPersistDisabled.Store(true)
 		return
+	}
+	if dir, err := storage.RatchetsDir(configPath); err == nil {
+		_ = os.MkdirAll(dir, 0o700)
 	}
 
 	loadKnownDestinationsFromDisk(configPath)
@@ -177,13 +209,18 @@ func loadKnownDestinationsFromDisk(configPath string) {
 		if id == nil {
 			continue
 		}
-		canonicalKey := hex.EncodeToString(rec.destHash)
-		knownDestinations[canonicalKey] = []any{
-			rec.packetRaw,
-			rec.destHash,
-			id,
-			rec.appData,
+		canonicalKey := knownDestKey(rec.destHash)
+		knownDestinations[canonicalKey] = knownDestEntry{
+			pkt:  rec.packetRaw,
+			hash: rec.destHash,
+			id:   id,
+			app:  rec.appData,
 		}
+		rememberedAt := int64(rec.rememberedAt)
+		if rememberedAt <= 0 {
+			rememberedAt = time.Now().Unix()
+		}
+		setKnownDestMetaLocked(canonicalKey, rememberedAt, int64(rec.lastUsed))
 		count++
 	}
 
@@ -199,6 +236,7 @@ func markKnownDestinationsDirty() {
 	if knownPersistMemory.Load() || knownPersistDisabled.Load() {
 		return
 	}
+	knownPersistGen.Add(1)
 	knownPersistDirty.Store(true)
 }
 
@@ -227,32 +265,26 @@ func saveKnownDestinations(force bool) {
 	}
 	defer knownPersistSaving.Unlock()
 
+	gen := knownPersistGen.Load()
+
 	knownDestinationsLock.RLock()
 	export := make(map[string][]any, len(knownDestinations))
-	for hashKey, data := range knownDestinations {
-		if len(data) < 4 {
+	for hashKey, e := range knownDestinations {
+		if e.id == nil || len(e.hash) == 0 {
 			continue
 		}
-		destHash, _ := data[1].([]byte)
-		id, _ := data[2].(*Identity)
-		appData, _ := data[3].([]byte)
-		if id == nil || len(destHash) == 0 {
-			continue
-		}
-		var packetHash []byte
-		if packetBytes, ok := data[0].([]byte); ok {
-			packetHash = packetBytes
-		}
-		key := hashKey
-		if key == "" {
-			key = hex.EncodeToString(destHash)
+		key := hex.EncodeToString(hashKey[:])
+		meta := knownDestMetaByKey[hashKey]
+		rememberedAt := float64(meta.rememberedAt)
+		if rememberedAt == 0 {
+			rememberedAt = float64(time.Now().Unix())
 		}
 		export[key] = []any{
-			float64(0),
-			packetHash,
-			id.GetPublicKey(),
-			appData,
-			float64(0),
+			rememberedAt,
+			e.pkt,
+			e.id.GetPublicKey(),
+			e.app,
+			float64(meta.lastUsed),
 		}
 	}
 	knownDestinationsLock.RUnlock()
@@ -276,7 +308,10 @@ func saveKnownDestinations(force bool) {
 		disableKnownDestinationsPersistence(err)
 		return
 	}
-	knownPersistDirty.Store(false)
+	// Only clear dirty when no Remember/Retain landed after the snapshot gen.
+	if knownPersistGen.Load() == gen {
+		knownPersistDirty.Store(false)
+	}
 	debug.Log(debug.DebugVerbose, "Saved known destinations to storage", "count", len(export))
 }
 

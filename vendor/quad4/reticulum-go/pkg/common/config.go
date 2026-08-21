@@ -113,6 +113,12 @@ type InterfaceConfig struct {
 	// Empty means full.
 	Mode string
 
+	// Gravity is pathing affinity (RNS 1.4.1). Higher values win path table
+	// contests when the same announce emission arrives on multiple interfaces.
+	// Zero is the Python default unless default_gravity is set globally.
+	Gravity    int
+	GravitySet bool
+
 	// RecursivePRs enables path discovery for unknown destinations on this
 	// interface.
 	RecursivePRs bool
@@ -121,6 +127,11 @@ type InterfaceConfig struct {
 	// internal-mode next hop are rebroadcast. Default true when unset.
 	AnnouncesFromInternal    bool
 	AnnouncesFromInternalSet bool
+
+	// AnnouncesToInternal allows a boundary-mode next hop to forward announces
+	// onto internal-mode interfaces (RNS 1.4.1). Default false when unset.
+	AnnouncesToInternal    bool
+	AnnouncesToInternalSet bool
 
 	// Outgoing allows the interface to transmit. Default true when unset.
 	// When false the interface is receive-only (Python OUT = False).
@@ -137,7 +148,7 @@ type InterfaceConfig struct {
 	// Zero means the Python default of 6 hours. Config key announce_interval
 	// is minutes and is converted at parse time.
 	DiscoveryAnnounceIntervalSec int
-	// DiscoveryStampValue overrides the proof-of-work cost (default 14).
+	// DiscoveryStampValue overrides the proof-of-work cost (default 16).
 	DiscoveryStampValue int
 	// DiscoveryEncrypt encrypts announces with the network identity.
 	DiscoveryEncrypt bool
@@ -213,6 +224,28 @@ type ReticulumConfig struct {
 	// sandbox is enabled. Default true. Soft-fails if the kernel rejects the filter.
 	EnableSeccomp bool
 
+	// DefaultGravity is the pathing affinity applied to interfaces that do not
+	// set gravity explicitly (RNS 1.4.1). Zero matches Python DEFAULT_GRAVITY.
+	DefaultGravity    int
+	DefaultGravitySet bool
+
+	// AutoconnectInterfaceGravity is applied to discovered autoconnect peers
+	// when autoconnect is enabled (RNS 1.4.1).
+	AutoconnectInterfaceGravity    int
+	AutoconnectInterfaceGravitySet bool
+
+	// AutoconnectInterfaceMode overrides the mode for autoconnected interfaces.
+	AutoconnectInterfaceMode string
+
+	// AutoconnectAnnouncesToInternal sets announces_to_internal on autoconnect peers.
+	AutoconnectAnnouncesToInternal    bool
+	AutoconnectAnnouncesToInternalSet bool
+
+	// AllowLinkPathRebalance enables LRPROOF-based hop rebalancing (RNS 1.4.1).
+	// Default true. Go adds dampening and gravity-aware refusals on top.
+	AllowLinkPathRebalance    bool
+	AllowLinkPathRebalanceSet bool
+
 	// EnableControlAPI turns on the localhost JSON control API (pkg/controlapi)
 	// that lets non-Go applications use destinations, links, and announces
 	// without embedding the Reticulum stack.
@@ -243,35 +276,97 @@ type ReticulumConfig struct {
 	// growing unbounded. Zero leaves the runtime default (unlimited).
 	SoftMemoryLimitBytes int64
 
+	// DoSProtection selects IDS/IPS style flood and OOM gates off detect prevent or auto.
+	// Go-only. Default auto. Detect warns on stdout and increments health counters.
+	// Prevent also sheds ingress refuses excess accepts and drops overloaded handlers.
+	// Auto learns quietly persists baselines via msgpack then arms prevent and relearns on change.
+	DoSProtection string
+
+	// DoSProtectionSet is true when dos_protection appeared in the config file.
+	DoSProtectionSet bool
+
+	DoSMaxPPS       float64
+	DoSMaxBPS       float64
+	DoSFloorPPS     float64
+	DoSFloorBPS     float64
+	DoSMaxConns     int
+	DoSMaxResources int
+	DoSMaxCrypto    int
+	DoSMaxHandshake int
+
 	// IdentityBackend selects identity at-rest storage: "file" (default),
 	// "secretservice" (Freedesktop Secret Service), or "keyring" (Linux kernel
 	// keyring, no D-Bus). When a non-file backend fails, persistence returns an error.
 	IdentityBackend string
 
-	// MaxInMemoryPaths caps the live path table when in-memory storage is
-	// active. Zero uses DefaultMaxInMemoryPaths. Negative disables the cap.
-	MaxInMemoryPaths int
+	// MaxInMemoryPaths caps the live path table in RAM. Zero uses
+	// DefaultMaxInMemoryPaths. Negative disables the cap.
+	MaxInMemoryPaths    int
+	MaxInMemoryPathsSet bool
 
-	// MaxInMemoryKnownDestinations caps known destinations when in-memory
-	// storage is active. Zero uses DefaultMaxInMemoryKnownDestinations.
-	// Negative disables the cap.
-	MaxInMemoryKnownDestinations int
+	// MaxInMemoryKnownDestinations caps known destinations in RAM. Zero uses
+	// DefaultMaxInMemoryKnownDestinations. Negative disables the cap.
+	MaxInMemoryKnownDestinations    int
+	MaxInMemoryKnownDestinationsSet bool
 
 	// MaxInMemoryResourceBytes caps staged split-resource bytes when
 	// in-memory storage is active. Zero uses DefaultMaxInMemoryResourceBytes.
 	// Negative disables the cap.
 	MaxInMemoryResourceBytes int64
 
+	// MaxPacketHashlist caps the packet hash loop filter. Zero selects a
+	// default from EnableTransport. Negative forces the full transport-sized
+	// default. Positive is an explicit entry budget.
+	MaxPacketHashlist    int
+	MaxPacketHashlistSet bool
+
+	// MaxPacketHandlers is the HandlePacket worker count and queue depth.
+	// Zero uses DefaultMaxPacketHandlers (512).
+	MaxPacketHandlers    int
+	MaxPacketHandlersSet bool
+
+	// NodeProfile selects a Go-only overlay that fills unset knobs:
+	// default, core_router, or embedded.
+	NodeProfile string
+
+	// SandboxStrict makes Landlock, seccomp, OpenBSD pledge/unveil lock, and
+	// FreeBSD CapEnter failures fatal. Default false. Platforms with no
+	// sandbox mechanism still start.
+	SandboxStrict bool
+
+	// SandboxProfile selects Landlock path rules: full (default, includes
+	// /bin for pipe and pageserver exec) or router (omits /bin trees).
+	// Other OS policies are unchanged. Never inferred from NodeProfile.
+	SandboxProfile string
+
+	// SandboxExtraPaths is an operator list of extra filesystem paths to
+	// allow in Landlock and OpenBSD unveil.
+	SandboxExtraPaths []string
+
+	// SandboxExecRlimits applies conservative rlimits to pipe, discovery, and
+	// dynamic page child processes on Linux. Default false.
+	SandboxExecRlimits bool
+
+	// SandboxSkipScoped skips Landlock V6 RestrictScoped. GUI processes that
+	// spawn WebKit helpers need abstract UNIX sockets and signals.
+	SandboxSkipScoped bool
+
+	// ControlAPISocket is an optional Unix socket path for the control API.
+	// TCP listen stays enabled when the control API is on.
+	ControlAPISocket string
+
 	// BackboneIO selects the kernel I/O multiplexer for backbone and local shared
 	// instance sockets: auto, epoll, kqueue, io_uring, or go.
-	BackboneIO string
+	BackboneIO    string
+	BackboneIOSet bool
 
 	// DiscoverInterfaces enables rnstransport discovery listening and
 	// AutoInterface NIC rescan when supported.
 	DiscoverInterfaces bool
 
 	// WatchInterfaces enables periodic NIC monitoring via net.Interfaces where supported.
-	WatchInterfaces bool
+	WatchInterfaces    bool
+	WatchInterfacesSet bool
 
 	// StaticTransportIdentity keeps the persisted transport identity on the
 	// wire even when enable_transport is no. When false and transport is
@@ -286,6 +381,15 @@ type ReticulumConfig struct {
 	// RespondToProbes registers a transport probe destination that proves
 	// all inbound data packets (rnprobe / reticulum-go probe).
 	RespondToProbes bool
+
+	// EnableRemoteManagement registers rnstransport.remote.management so
+	// remote rgopath / rgostatus (and Python rnpath / rnstatus) can query
+	// path tables and interface stats over a link. Default false.
+	EnableRemoteManagement bool
+
+	// RemoteManagementAllowed is the identity-hash ACL for remote management
+	// request handlers (Python remote_management_allowed).
+	RemoteManagementAllowed [][]byte
 
 	// NetworkIdentityPath is the path to the network identity file used to
 	// sign and encrypt interface discovery announces (Python network_identity).
