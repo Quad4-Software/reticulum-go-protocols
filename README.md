@@ -8,6 +8,7 @@ Go implementations of application protocols that run on [Reticulum-Go](https://g
 | [`pkg/lxmf`](pkg/lxmf) | [LXMF](https://github.com/markqvist/LXMF) 1.1.0 pack, stamp, paper URI, and delivery messenger |
 | [`pkg/rrc`](pkg/rrc) | [RRC](https://rrc.kc1awv.net/) protocol version 1 (spec 0.1.3) hub and client |
 | [`pkg/lxst`](pkg/lxst) | [LXST](https://pypi.org/project/lxst/) 0.5.1 telephony: encrypted voice calls over Reticulum links |
+| [`pkg/rnv`](pkg/rnv) | Reticulum Native Video: stills, clips, and low-rate A/V streams over Reticulum links |
 
 ## Requirements
 
@@ -179,6 +180,46 @@ Python round-trips need `pip install lxst==0.5.1`. Run them with `task test:lxst
 
 Go examples: `task example:lxst` (wire codec), `task example:lxst:call` (minimal two-node call).
 
+## pkg/rnv
+
+Go-only Reticulum Native Video (protocol version 1). Destination is `rnv.media`. Sessions use encrypted RNS Links. Stills and clips may use RNS Resources for bulk. Live streams use droppable binary frames (`0xF1` video, `0xF2` audio).
+
+**What it is:** P2P still transfer, short opaque clips, low-rate MJPEG video with optional Opus/Codec2 audio on the same link.
+
+**What it is not:** LXST telephony (ringing, phonebook, busy). Guaranteed lip-sync or HD video. Group/broadcast fanout.
+
+| Use case | Stack |
+| --- | --- |
+| Voice-only call UI | LXST (`rnv.RecommendStack(UseCaseVoiceOnly)`) |
+| Stills / clips / A/V | RNV |
+
+```go
+cfg := session.SafeConfig() // prefers profile Low, no auto-announce
+ep, err := session.Bind(tr, id, cfg)
+if err != nil {
+	log.Fatal(err)
+}
+if err := ep.Announce(); err != nil {
+	log.Fatal(err)
+}
+conn, err := ep.Dial(peerHash)
+if err != nil {
+	log.Fatal(err)
+}
+defer conn.Close()
+_ = conn.SendStill(ctx, jpegBytes, proto.StillMeta{})
+sc, err := conn.OpenStream(ctx, proto.StreamOffer{
+	Profile: proto.ProfileMedium,
+	Tracks:  proto.TrackVideo | proto.TrackAudio,
+	Video:   proto.CodecJPEG,
+	Audio:   proto.CodecOpus,
+})
+```
+
+Footguns: `Announce` is never automatic. Video streams require profile Medium or High. Parallel LXST + RNV audio to the same peer is blocked unless `AllowParallelLXST`. Absolute size caps cannot rise without `DangerousRaiseLimits`. Extensions and private codecs (`0xE0`–`0xFE`) register via `proto.DefaultRegistry`.
+
+Tests: `task test:rnv` or `task test:rnv:short`. Live UDP mesh cases skip under `-short`.
+
 ## cmd/gorrcd
 
 Go RRC hub daemon with operator feature parity against [rrcd](https://github.com/kc1awv/rrcd). State lives in `GORRCD_HOME` or `~/.gorrcd/` (`gorrcd.toml`, `hub_identity`, `rooms.toml`) so it does not collide with Python `~/.rrcd`. First run writes defaults and exits 0.
@@ -214,6 +255,8 @@ task check
 | RRC tests | `task test:rrc` |
 | LXST tests | `task test:lxst` |
 | LXST Python interop | `task test:lxst:interop` |
+| RNV tests | `task test:rnv` |
+| RNV short | `task test:rnv:short` |
 | Codec bindings | `task test-codec` |
 | MF two-way messenger | `task test:messenger` |
 | Benchmarks | `task bench` |
