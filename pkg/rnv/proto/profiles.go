@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: 0BSD
 package proto
 
+import "slices"
+
 // ProfileLimits are hard bounds for a negotiated profile.
 type ProfileLimits struct {
 	StillMax    uint64
@@ -95,12 +97,7 @@ func HasCodec(caps Caps, codec byte) bool {
 	if len(caps.Codecs) == 0 {
 		return true
 	}
-	for _, c := range caps.Codecs {
-		if c == codec {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(caps.Codecs, codec)
 }
 
 // DefaultCaps returns SafeConfig-oriented capabilities (Low preferred).

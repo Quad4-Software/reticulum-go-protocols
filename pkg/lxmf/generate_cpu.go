@@ -34,7 +34,7 @@ func generateStampCPU(ctx context.Context, workblock []byte, stampCost int) ([]b
 	}
 
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		worker := w
 		wg.Go(func() {
 			h := sha256.New()
@@ -123,7 +123,7 @@ func generateStampCPUFallback(ctx context.Context, workblock []byte, stampCost i
 	}
 
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		worker := w
 		wg.Go(func() {
 			h := sha256.New()
