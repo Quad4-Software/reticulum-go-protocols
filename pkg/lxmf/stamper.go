@@ -7,11 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"time"
-
-	"quad4/msgpack/v5/pkg/msgpack"
-	"quad4/reticulum-go/pkg/cryptography"
 )
 
 // Workblock expansion rounds (aligned with LXStamper).
@@ -26,35 +22,6 @@ const (
 // ErrStampNotFound means GenerateStamp ended before finding a stamp (e.g. cancelled context).
 var ErrStampNotFound = errors.New("lxmf: stamp generation cancelled")
 
-// StampWorkblock returns the HKDF-expanded workblock (256 * expandRounds bytes).
-func StampWorkblock(material []byte, expandRounds int) ([]byte, error) {
-	if expandRounds <= 0 {
-		return nil, errors.New("lxmf: expandRounds must be positive")
-	}
-	if len(material) == 0 {
-		return nil, errors.New("lxmf: workblock material required")
-	}
-
-	out := make([]byte, 256*expandRounds)
-	saltSrc := make([]byte, 0, len(material)+16)
-	nBuf := make([]byte, 0, 16)
-	for n := range expandRounds {
-		var err error
-		nBuf, err = msgpack.AppendMarshal(nBuf[:0], n)
-		if err != nil {
-			return nil, fmt.Errorf("lxmf: workblock msgpack: %w", err)
-		}
-		saltSrc = append(saltSrc[:0], material...)
-		saltSrc = append(saltSrc, nBuf...)
-		saltSum := sha256.Sum256(saltSrc)
-		block, err := cryptography.DeriveKey(material, saltSum[:], nil, 256)
-		if err != nil {
-			return nil, fmt.Errorf("lxmf: workblock hkdf: %w", err)
-		}
-		copy(out[n*256:(n+1)*256], block)
-	}
-	return out, nil
-}
 
 func hashWorkblockStamp(workblock, stamp []byte) [32]byte {
 	h := sha256.New()
@@ -124,26 +91,6 @@ type PNStampEntry struct {
 	Stamp       []byte
 }
 
-// ValidatePNStamps validates each transient message and returns entries meeting targetCost.
-func ValidatePNStamps(messages [][]byte, targetCost int) []PNStampEntry {
-	if len(messages) == 0 {
-		return nil
-	}
-	out := make([]PNStampEntry, 0, len(messages))
-	for _, transientData := range messages {
-		tid, lxm, value, stamp := ValidatePNStamp(transientData, targetCost)
-		if tid == nil {
-			continue
-		}
-		out = append(out, PNStampEntry{
-			TransientID: append([]byte(nil), tid...),
-			LxmData:     lxm,
-			Value:       value,
-			Stamp:       stamp,
-		})
-	}
-	return out
-}
 
 // ValidatePNStamp checks PN transient data (LXMF bytes + 32-byte stamp) and returns ids and stamp on success.
 func ValidatePNStamp(transientData []byte, targetCost int) (transientID, lxmData []byte, value int, stamp []byte) {
