@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"unsafe"
@@ -404,14 +405,21 @@ func (e *gpuEngineState) workblock(material []byte, rounds int) ([]byte, error) 
 	if st := api.enqueueRead(e.queue, outBuf, 1, 0, uintptr(outBytes), unsafe.Pointer(&out[0]), 0, 0, 0); st != clSuccess {
 		return nil, fmt.Errorf("opencl: wb read %d", st)
 	}
-	ref, err := stampWorkblockCPU(material, rounds)
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(out, ref) {
-		return nil, fmt.Errorf("opencl: workblock mismatch vs cpu")
+	if gpuWorkblockVerifyEnabled() {
+		ref, err := stampWorkblockCPU(material, rounds)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(out, ref) {
+			return nil, fmt.Errorf("opencl: workblock mismatch vs cpu")
+		}
 	}
 	return out, nil
+}
+
+func gpuWorkblockVerifyEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("RNS_LXSTAMP_GPU_VERIFY")))
+	return v == "1" || v == "true" || v == "yes"
 }
 
 func (e *gpuEngineState) batchValidate(cands []StampCandidate, targetCost, expandRounds int) ([]bool, error) {
@@ -500,4 +508,3 @@ func (e *gpuEngineState) batchValidate(cands []StampCandidate, targetCost, expan
 	}
 	return out, nil
 }
-

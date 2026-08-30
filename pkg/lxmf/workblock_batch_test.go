@@ -59,9 +59,26 @@ func TestValidatePNStampsParallel(t *testing.T) {
 	}
 	msg := append(append([]byte{}, lxm...), st...)
 	bad := append(append([]byte{}, lxm...), bytes.Repeat([]byte{0xff}, StampSize)...)
-	got := ValidatePNStamps([][]byte{msg, bad, msg}, 4)
+	short := bytes.Repeat([]byte{0x44}, Overhead+StampSize)
+	got := ValidatePNStamps([][]byte{msg, bad, msg, short}, 4)
 	if len(got) != 2 {
 		t.Fatalf("got %d entries want 2", len(got))
+	}
+}
+
+func TestValidateStampBatchCostZero(t *testing.T) {
+	material := bytes.Repeat([]byte{0x11}, 16)
+	stamp := bytes.Repeat([]byte{0xab}, StampSize)
+	longMat := bytes.Repeat([]byte{0x22}, 80)
+	cands := []StampCandidate{
+		{Material: material, Stamp: stamp},
+		{Material: material, Stamp: stamp[:16]},
+		{Material: longMat, Stamp: stamp},
+		{Material: nil, Stamp: stamp},
+	}
+	ok := ValidateStampBatch(cands, 0, 3)
+	if !ok[0] || ok[1] || !ok[2] || ok[3] {
+		t.Fatalf("cost0 batch=%v", ok)
 	}
 }
 
