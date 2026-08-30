@@ -3,6 +3,7 @@ module quad4/reticulum-go-protocols
 go 1.26.6
 
 require (
+	github.com/ebitengine/purego v0.9.1
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/landlock-lsm/go-landlock v0.9.0
 	golang.org/x/sys v0.47.0

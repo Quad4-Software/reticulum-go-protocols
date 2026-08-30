@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: 0BSD
+
 package lxmf
 
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding"
 	"errors"
 	"fmt"
-	"runtime"
-	"sync"
 	"time"
 
 	"quad4/msgpack/v5/pkg/msgpack"
@@ -38,7 +35,7 @@ func StampWorkblock(material []byte, expandRounds int) ([]byte, error) {
 		return nil, errors.New("lxmf: workblock material required")
 	}
 
-	out := make([]byte, 0, 256*expandRounds)
+	out := make([]byte, 256*expandRounds)
 	saltSrc := make([]byte, 0, len(material)+16)
 	nBuf := make([]byte, 0, 16)
 	for n := range expandRounds {
@@ -54,7 +51,7 @@ func StampWorkblock(material []byte, expandRounds int) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("lxmf: workblock hkdf: %w", err)
 		}
-		out = append(out, block...)
+		copy(out[n*256:(n+1)*256], block)
 	}
 	return out, nil
 }
@@ -106,6 +103,17 @@ func StampValid(stamp []byte, targetCost int, workblock []byte) bool {
 	sum := hashWorkblockStamp(workblock, stamp)
 	target := stampTarget(targetCost)
 	return bytes.Compare(sum[:], target[:]) <= 0
+}
+
+// MeetsCost reports whether stamp passes StampValid and StampValue >= cost.
+func MeetsCost(stamp []byte, targetCost int, workblock []byte) bool {
+	if !StampValid(stamp, targetCost, workblock) {
+		return false
+	}
+	if targetCost <= 0 {
+		return len(stamp) == StampSize
+	}
+	return StampValue(workblock, stamp) >= targetCost
 }
 
 // PNStampEntry is one validated propagation stamp batch entry.
@@ -163,98 +171,6 @@ func ValidatePeeringKey(peeringID, peeringKey []byte, targetCost int) bool {
 		return false
 	}
 	return StampValid(peeringKey, targetCost, wb)
-}
-
-// GenerateStamp searches for a stamp meeting stampCost; parallel workers respect ctx. ErrStampNotFound if cancelled.
-func GenerateStamp(ctx context.Context, messageID []byte, stampCost, expandRounds int) ([]byte, int, error) {
-	if stampCost <= 0 {
-		return nil, 0, errors.New("lxmf: stampCost must be positive")
-	}
-	if expandRounds <= 0 {
-		expandRounds = WorkblockExpandRounds
-	}
-	wb, err := StampWorkblock(messageID, expandRounds)
-	if err != nil {
-		return nil, 0, err
-	}
-	target := stampTarget(stampCost)
-
-	workers := max(runtime.NumCPU(), 1)
-
-	type result struct {
-		stamp []byte
-	}
-
-	resCh := make(chan result, 1)
-	subCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	base := sha256.New()
-	base.Write(wb)
-	mar, ok := base.(encoding.BinaryMarshaler)
-	var midState []byte
-	if ok {
-		midState, err = mar.MarshalBinary()
-		if err != nil {
-			midState = nil
-		}
-	}
-
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
-			candidate := make([]byte, StampSize)
-			h := sha256.New()
-			un, unOK := h.(encoding.BinaryUnmarshaler)
-			useMid := unOK && len(midState) > 0
-			var concat []byte
-			if !useMid {
-				concat = make([]byte, 0, len(wb)+StampSize)
-			}
-			for {
-				select {
-				case <-subCtx.Done():
-					return
-				default:
-				}
-				if _, err := rand.Read(candidate); err != nil {
-					return
-				}
-				var sum [32]byte
-				if useMid {
-					if err := un.UnmarshalBinary(midState); err != nil {
-						return
-					}
-					h.Write(candidate)
-					h.Sum(sum[:0])
-				} else {
-					concat = append(concat[:0], wb...)
-					concat = append(concat, candidate...)
-					sum = sha256.Sum256(concat)
-				}
-				if bytes.Compare(sum[:], target[:]) <= 0 {
-					stamp := append([]byte(nil), candidate...)
-					select {
-					case resCh <- result{stamp: stamp}:
-						cancel()
-					case <-subCtx.Done():
-					}
-					return
-				}
-			}
-		})
-	}
-
-	go func() {
-		wg.Wait()
-		close(resCh)
-	}()
-
-	res, ok := <-resCh
-	if !ok {
-		return nil, 0, ErrStampNotFound
-	}
-	return res.stamp, StampValue(wb, res.stamp), nil
 }
 
 // GenerateStampWithDeadline wraps GenerateStamp with a deadline.
