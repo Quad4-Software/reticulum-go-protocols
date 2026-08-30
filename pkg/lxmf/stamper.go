@@ -22,7 +22,6 @@ const (
 // ErrStampNotFound means GenerateStamp ended before finding a stamp (e.g. cancelled context).
 var ErrStampNotFound = errors.New("lxmf: stamp generation cancelled")
 
-
 func hashWorkblockStamp(workblock, stamp []byte) [32]byte {
 	h := sha256.New()
 	h.Write(workblock)
@@ -90,7 +89,6 @@ type PNStampEntry struct {
 	Value       int
 	Stamp       []byte
 }
-
 
 // ValidatePNStamp checks PN transient data (LXMF bytes + 32-byte stamp) and returns ids and stamp on success.
 func ValidatePNStamp(transientData []byte, targetCost int) (transientID, lxmData []byte, value int, stamp []byte) {

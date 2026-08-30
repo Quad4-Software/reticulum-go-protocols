@@ -19,17 +19,17 @@ import (
 var gpuEngine *gpuEngineState
 
 type gpuEngineState struct {
-	api            *openclAPI
-	device         clDeviceID
-	ctx            clContext
-	queue          clCommandQueue
-	program        clProgram
-	kernelSearch   clKernel
+	api             *openclAPI
+	device          clDeviceID
+	ctx             clContext
+	queue           clCommandQueue
+	program         clProgram
+	kernelSearch    clKernel
 	kernelWorkblock clKernel
-	kernelBatch    clKernel
-	vendor         string
-	name           string
-	mu             sync.Mutex
+	kernelBatch     clKernel
+	vendor          string
+	name            string
+	mu              sync.Mutex
 }
 
 type clCandidate struct {

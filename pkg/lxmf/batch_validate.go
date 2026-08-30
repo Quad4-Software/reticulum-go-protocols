@@ -59,7 +59,7 @@ func validateStampBatchCPU(cands []StampCandidate, targetCost, expandRounds int)
 	workers := max(min(runtime.GOMAXPROCS(0), len(cands)), 1)
 	var wg sync.WaitGroup
 	chunk := (len(cands) + workers - 1) / workers
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		start := w * chunk
 		if start >= len(cands) {
 			break
@@ -91,14 +91,14 @@ func ValidatePNStamps(messages [][]byte, targetCost int) []PNStampEntry {
 	}
 
 	type slot struct {
-		ok   bool
-		ent  PNStampEntry
+		ok  bool
+		ent PNStampEntry
 	}
 	slots := make([]slot, len(messages))
 	workers := max(min(runtime.GOMAXPROCS(0), len(messages)), 1)
 	var wg sync.WaitGroup
 	chunk := (len(messages) + workers - 1) / workers
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		start := w * chunk
 		if start >= len(messages) {
 			break

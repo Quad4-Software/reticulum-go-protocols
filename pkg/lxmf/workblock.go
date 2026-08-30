@@ -61,7 +61,7 @@ func stampWorkblockCPU(material []byte, expandRounds int) ([]byte, error) {
 		ret  error
 	)
 	chunk := (expandRounds + workers - 1) / workers
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		start := w * chunk
 		if start >= expandRounds {
 			break
