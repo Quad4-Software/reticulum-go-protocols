@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"net"
 	"testing"
 	"time"
 
@@ -35,9 +36,10 @@ func TestLiveStillStream(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live rnv mesh skipped in -short")
 	}
-	base := 39100
-	trA, idA, ifA := startNode(t, "A", base, base+1)
-	trB, idB, ifB := startNode(t, "B", base+1, base)
+	portA := freeUDP(t)
+	portB := freeUDP(t)
+	trA, idA, ifA := startNode(t, "A", portA, portB)
+	trB, idB, ifB := startNode(t, "B", portB, portA)
 	defer ifA.Stop()
 	defer ifB.Stop()
 
@@ -125,9 +127,10 @@ func TestLiveRejectCapacityFallback(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live rnv mesh skipped in -short")
 	}
-	base := 39200
-	trA, idA, ifA := startNode(t, "A", base, base+1)
-	trB, idB, ifB := startNode(t, "B", base+1, base)
+	portA := freeUDP(t)
+	portB := freeUDP(t)
+	trA, idA, ifA := startNode(t, "A", portA, portB)
+	trB, idB, ifB := startNode(t, "B", portB, portA)
 	defer ifA.Stop()
 	defer ifB.Stop()
 
@@ -195,6 +198,17 @@ func startNode(t *testing.T, tag string, localPort, peerPort int) (*transport.Tr
 	return tr, id, iface
 }
 
+func freeUDP(t *testing.T) int {
+	t.Helper()
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := c.LocalAddr().(*net.UDPAddr).Port
+	_ = c.Close()
+	return port
+}
+
 func waitPath(t *testing.T, tr *transport.Transport, hash []byte, timeout time.Duration) {
 	t.Helper()
 	_ = tr.RequestPath(hash, "", nil, true)
@@ -211,14 +225,15 @@ func waitPath(t *testing.T, tr *transport.Transport, hash []byte, timeout time.D
 
 func tinyJPEG(t *testing.T) []byte {
 	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
-	for y := range 8 {
-		for x := range 8 {
-			img.Set(x, y, color.RGBA{R: uint8(x * 20), G: uint8(y * 20), B: 80, A: 255})
+	// Prefer a small JPEG that fits inline in a STILL envelope (avoid resource race).
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := range 4 {
+		for x := range 4 {
+			img.Set(x, y, color.RGBA{R: 200, G: 100, B: 50, A: 255})
 		}
 	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 40}); err != nil {
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 20}); err != nil {
 		t.Fatal(err)
 	}
 	return buf.Bytes()

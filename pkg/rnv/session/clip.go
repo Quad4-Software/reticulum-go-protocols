@@ -7,6 +7,7 @@ import (
 
 	"quad4/reticulum-go-protocols/pkg/rnv"
 	"quad4/reticulum-go-protocols/pkg/rnv/proto"
+	"quad4/reticulum-go/pkg/resource"
 )
 
 const largeClipProgressThreshold = 1 << 20
@@ -82,8 +83,25 @@ func (c *Conn) SendClip(ctx context.Context, data []byte, meta proto.ClipMeta, p
 	if progress != nil {
 		progress(0, meta.Size)
 	}
-	if err := c.sendPayload(ctx, data, timeout); err != nil {
+	res, err := resource.New(data, true)
+	if err != nil {
 		return err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- c.lnk.SendResource(res)
+	}()
+	timer2 := time.NewTimer(timeout)
+	defer timer2.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer2.C:
+		return rnv.ErrResourceTimeout
+	case err := <-done:
+		if err != nil {
+			return err
+		}
 	}
 	if progress != nil {
 		progress(meta.Size, meta.Size)
