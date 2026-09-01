@@ -23,6 +23,13 @@ func startTransport(cfg Config, log *slog.Logger) (*transport.Transport, []inter
 	rnsDir := ResolveRNSConfigDir(cfg.ConfigDir)
 	if rnsDir != "" {
 		rc.ConfigPath = filepath.Join(rnsDir, "config")
+		created, err := rnsnode.EnsureDefaultConfig(rnsDir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("rns config: %w", err)
+		}
+		if created {
+			log.Info("created default reticulum-go config", "path", rc.ConfigPath)
+		}
 	}
 	tr := transport.NewTransport(rc)
 	if err := tr.Start(); err != nil {
@@ -97,7 +104,7 @@ func attachFromRNSConfig(rnsDir string, tr *transport.Transport, attach func(str
 	if strings.TrimSpace(rnsDir) == "" {
 		return 0
 	}
-	rcfg, err := rnsnode.LoadReticulumDirLenient(rnsDir)
+	rcfg, err := rnsnode.LoadOfficialDir(rnsDir)
 	if err != nil {
 		log.Info("rns config not loaded", "dir", rnsDir, "error", err)
 		return 0
@@ -122,11 +129,11 @@ func attachFromRNSConfig(rnsDir string, tr *transport.Transport, attach func(str
 			continue
 		}
 		enableDuplex(iface)
-		if err := attach(name, iface); err != nil {
+		if err := attach(iface.GetName(), iface); err != nil {
 			log.Warn("start rns interface failed", "name", name, "error", err)
 			continue
 		}
-		log.Info("rns interface up", "name", name, "type", ic.Type)
+		log.Info("rns interface up", "name", iface.GetName(), "type", ic.Type)
 		started++
 	}
 	return started

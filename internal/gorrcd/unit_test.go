@@ -147,7 +147,7 @@ func TestUnit_FirstRunPermissions(t *testing.T) {
 	cfg := filepath.Join(dir, "gorrcd.toml")
 	id := filepath.Join(dir, "hub_identity")
 	rooms := filepath.Join(dir, "rooms.toml")
-	created, err := FirstRun(cfg, id, rooms)
+	created, err := FirstRun(cfg, id, rooms, filepath.Join(dir, "rns"))
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}

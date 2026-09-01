@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"quad4/reticulum-go-protocols/pkg/lxst/rnsnode"
 	"quad4/reticulum-go/pkg/debug"
 	"quad4/reticulum-go/pkg/identity"
 )
@@ -62,7 +63,7 @@ func ConfigureLogging(cfg Config) (*slog.Logger, io.Closer, error) {
 	return slog.New(h), closer, nil
 }
 
-func FirstRun(cfgPath, identPath, roomsPath string) (bool, error) {
+func FirstRun(cfgPath, identPath, roomsPath, rnsDir string) (bool, error) {
 	created := false
 	if err := ensurePrivateDir(filepath.Dir(cfgPath)); err != nil {
 		return false, err
@@ -99,6 +100,9 @@ func FirstRun(cfgPath, identPath, roomsPath string) (bool, error) {
 			}
 			created = true
 		}
+	}
+	if _, err := rnsnode.EnsureDefaultConfig(ResolveRNSConfigDir(rnsDir)); err != nil {
+		return false, err
 	}
 	return created, nil
 }

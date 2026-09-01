@@ -49,13 +49,13 @@ func run(args []string) int {
 		return 0
 	}
 
-	created, err := gorrcd.FirstRun(*configPath, *identityPath, *roomsPath)
+	created, err := gorrcd.FirstRun(*configPath, *identityPath, *roomsPath, *configDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gorrcd: first run: %v\n", err)
 		return 1
 	}
 	if created {
-		gorrcd.PrintFirstRunNotice(*configPath, *identityPath, *roomsPath)
+		gorrcd.PrintFirstRunNotice(*configPath, *identityPath, *roomsPath, gorrcd.ResolveRNSConfigDir(*configDir))
 		return 0
 	}
 

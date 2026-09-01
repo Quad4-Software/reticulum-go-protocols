@@ -23,17 +23,21 @@ func TestAcceptance_2_FirstRunPrivateFiles(t *testing.T) {
 	cfg := filepath.Join(dir, "gorrcd.toml")
 	id := filepath.Join(dir, "hub_identity")
 	rooms := filepath.Join(dir, "rooms.toml")
-	created, err := FirstRun(cfg, id, rooms)
+	rns := filepath.Join(dir, "rns")
+	created, err := FirstRun(cfg, id, rooms, rns)
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	created2, err := FirstRun(cfg, id, rooms)
+	created2, err := FirstRun(cfg, id, rooms, rns)
 	if err != nil || created2 {
 		t.Fatalf("second created=%v err=%v", created2, err)
 	}
 	raw, err := os.ReadFile(cfg)
 	if err != nil || len(raw) == 0 {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(rns, "config")); err != nil {
+		t.Fatalf("rns config: %v", err)
 	}
 }
 

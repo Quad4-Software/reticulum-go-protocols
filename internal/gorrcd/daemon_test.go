@@ -119,14 +119,18 @@ func TestFirstRun(t *testing.T) {
 	cfg := filepath.Join(dir, "gorrcd.toml")
 	id := filepath.Join(dir, "hub_identity")
 	rooms := filepath.Join(dir, "rooms.toml")
-	created, err := FirstRun(cfg, id, rooms)
+	rns := filepath.Join(dir, "rns")
+	created, err := FirstRun(cfg, id, rooms, rns)
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
 	if _, err := os.Stat(cfg); err != nil {
 		t.Fatal(err)
 	}
-	created2, err := FirstRun(cfg, id, rooms)
+	if _, err := os.Stat(filepath.Join(rns, "config")); err != nil {
+		t.Fatal(err)
+	}
+	created2, err := FirstRun(cfg, id, rooms, rns)
 	if err != nil || created2 {
 		t.Fatalf("second run created=%v err=%v", created2, err)
 	}

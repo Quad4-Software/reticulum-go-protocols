@@ -16,7 +16,7 @@ make install-gorrcd
 make install-gorrcd PREFIX=$HOME/.local
 ```
 
-Attach to a running Reticulum shared instance when available, otherwise start AutoInterface. For loopback tests, `--udp-listen` and `--udp-forward` bind a UDP pair and skip AutoInterface. `--ready-file` writes the hub destination hash when the daemon is up.
+Attach to a running Reticulum shared instance when available, otherwise load interfaces from `~/.reticulum-go/config` (created with reticulum-go defaults including Auto Discovery on first run). For loopback tests, `--udp-listen` and `--udp-forward` bind a UDP pair and skip AutoInterface. `--ready-file` writes the hub destination hash when the daemon is up.
 
 Trusted identities may use `/stats`, `/reload`, and `/kline`. Room founders and ops may use `/kick`, `/topic`, `/mode`, `/op`, `/deop`, `/voice`, `/devoice`, `/ban`, and `/invite`. Anyone may `/list` and `/who`.
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"quad4/reticulum-go/pkg/term"
 )
@@ -62,10 +63,13 @@ func clearLiveStatusLine() {
 }
 
 // PrintFirstRunNotice prints a colored first-run hint on stderr.
-func PrintFirstRunNotice(cfgPath, identPath, roomsPath string) {
+func PrintFirstRunNotice(cfgPath, identPath, roomsPath, rnsDir string) {
 	fmt.Fprintf(os.Stderr, "\n%s Created default gorrcd files.\n", stderrOK("ok"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", stderrLabel("Config:"), cfgPath)
 	fmt.Fprintf(os.Stderr, "  %s %s\n", stderrLabel("Identity:"), identPath)
 	fmt.Fprintf(os.Stderr, "  %s %s\n", stderrLabel("Rooms:"), roomsPath)
+	if rnsDir != "" {
+		fmt.Fprintf(os.Stderr, "  %s %s\n", stderrLabel("RNS config:"), filepath.Join(rnsDir, "config"))
+	}
 	fmt.Fprintf(os.Stderr, "\nEdit the configuration, then re-run gorrcd.\n\n")
 }
