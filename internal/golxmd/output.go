@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"quad4/reticulum-go/pkg/term"
@@ -73,11 +74,14 @@ func PrintSelfCheckResults(results []SelfCheckResult) {
 }
 
 // PrintFirstRunNotice prints a colored first-run hint on stderr.
-func PrintFirstRunNotice(cfgPath, identPath, storageDir string) {
+func PrintFirstRunNotice(cfgPath, identPath, storageDir, rnsDir string) {
 	fmt.Fprintf(os.Stderr, "\n%s Created default golxmd files.\n", statusOK("ok"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", statusLabel("Config:"), cfgPath)
 	fmt.Fprintf(os.Stderr, "  %s %s\n", statusLabel("Identity:"), identPath)
 	fmt.Fprintf(os.Stderr, "  %s %s\n", statusLabel("Storage:"), storageDir)
+	if rnsDir != "" {
+		fmt.Fprintf(os.Stderr, "  %s %s\n", statusLabel("RNS config:"), filepath.Join(rnsDir, "config"))
+	}
 	fmt.Fprintf(os.Stderr, "\nEdit the configuration, then re-run golxmd.\n\n")
 }
 

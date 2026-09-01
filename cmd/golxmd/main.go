@@ -72,9 +72,10 @@ func run(args []string) int {
 
 	if *selfCheck {
 		results := golxmd.RunSelfCheck(golxmd.SelfCheckOptions{
-			Home:       home,
-			UDPListen:  *udpListen,
-			UDPForward: *udpForward,
+			Home:         home,
+			RNSConfigDir: *rnsConfig,
+			UDPListen:    *udpListen,
+			UDPForward:   *udpForward,
 		})
 		golxmd.PrintSelfCheckResults(results)
 		if !golxmd.SelfCheckPassed(results) {
@@ -122,13 +123,13 @@ func run(args []string) int {
 		return 0
 	}
 
-	created, err := golxmd.FirstRun(home, cfgPath, identPath, storageDir, messagesDir)
+	created, err := golxmd.FirstRun(home, cfgPath, identPath, storageDir, messagesDir, *rnsConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "golxmd: first run: %v\n", err)
 		return 1
 	}
 	if created {
-		golxmd.PrintFirstRunNotice(cfgPath, identPath, storageDir)
+		golxmd.PrintFirstRunNotice(cfgPath, identPath, storageDir, golxmd.ResolveRNSConfigDir(*rnsConfig))
 		return 0
 	}
 

@@ -17,8 +17,9 @@ func TestFirstRunCreatesFiles(t *testing.T) {
 	identPath := filepath.Join(home, "identity")
 	storageDir := filepath.Join(home, "storage")
 	messagesDir := filepath.Join(storageDir, "messages")
+	rnsDir := filepath.Join(home, "rns")
 
-	created, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir)
+	created, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir, rnsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,8 +32,11 @@ func TestFirstRunCreatesFiles(t *testing.T) {
 	if _, err := os.Stat(identPath); err != nil {
 		t.Fatalf("identity: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(rnsDir, "config")); err != nil {
+		t.Fatalf("rns config: %v", err)
+	}
 
-	created2, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir)
+	created2, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir, rnsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +51,7 @@ func TestConfigLoadFromFirstRun(t *testing.T) {
 	identPath := filepath.Join(home, "identity")
 	storageDir := filepath.Join(home, "storage")
 	messagesDir := filepath.Join(storageDir, "messages")
-	if _, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir); err != nil {
+	if _, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir, filepath.Join(home, "rns")); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := lxmf.LoadConfig(cfgPath)

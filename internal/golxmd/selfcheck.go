@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"quad4/reticulum-go-protocols/pkg/lxmf"
 	"quad4/reticulum-go/pkg/identity"
@@ -12,9 +13,10 @@ import (
 
 // SelfCheckOptions configures local validation.
 type SelfCheckOptions struct {
-	Home       string
-	UDPListen  string
-	UDPForward string
+	Home         string
+	RNSConfigDir string
+	UDPListen    string
+	UDPForward   string
 }
 
 // SelfCheckResult is one self-check step.
@@ -43,7 +45,7 @@ func RunSelfCheck(opts SelfCheckOptions) []SelfCheckResult {
 	out = append(out, checkRoundTripWrite("storage directory", storageDir))
 	out = append(out, checkRoundTripWrite("messages directory", messagesDir))
 
-	created, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir)
+	created, err := FirstRun(home, cfgPath, identPath, storageDir, messagesDir, rnsConfigDirForSelfCheck(opts, home))
 	if err != nil {
 		out = append(out, SelfCheckResult{Name: "first run", OK: false, Detail: err.Error()})
 	} else if created {
@@ -82,14 +84,29 @@ func RunSelfCheck(opts SelfCheckOptions) []SelfCheckResult {
 		}
 	}
 
-	rnsDir := ResolveRNSConfigDir("")
+	rnsDir := rnsConfigDirForSelfCheck(opts, home)
 	out = append(out, checkDirReadable("RNS config directory", rnsDir))
+	if _, err := os.Stat(filepath.Join(rnsDir, "config")); err != nil {
+		out = append(out, SelfCheckResult{Name: "RNS config file", OK: false, Detail: err.Error()})
+	} else {
+		out = append(out, SelfCheckResult{Name: "RNS config file", OK: true, Detail: filepath.Join(rnsDir, "config")})
+	}
 
 	if opts.UDPListen != "" && opts.UDPForward != "" {
 		out = append(out, checkUDPTransport(opts.UDPListen, opts.UDPForward))
 	}
 
 	return out
+}
+
+func rnsConfigDirForSelfCheck(opts SelfCheckOptions, home string) string {
+	if strings.TrimSpace(opts.RNSConfigDir) != "" {
+		return ResolveRNSConfigDir(opts.RNSConfigDir)
+	}
+	if opts.Home != "" && expandPath(opts.Home) != expandPath(DefaultHome()) {
+		return filepath.Join(home, "rns")
+	}
+	return ResolveRNSConfigDir("")
 }
 
 func checkDirWritable(name, path string) SelfCheckResult {

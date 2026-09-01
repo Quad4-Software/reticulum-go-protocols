@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"quad4/reticulum-go-protocols/pkg/lxmf"
+	"quad4/reticulum-go-protocols/pkg/lxst/rnsnode"
 	"quad4/reticulum-go/pkg/common"
 	"quad4/reticulum-go/pkg/debug"
 	"quad4/reticulum-go/pkg/identity"
@@ -116,7 +117,7 @@ func slogLevelForLXMF(level int) slog.Level {
 	}
 }
 
-func FirstRun(home, configPath, identityPath, storageDir, messagesDir string) (bool, error) {
+func FirstRun(home, configPath, identityPath, storageDir, messagesDir, rnsDir string) (bool, error) {
 	created := false
 	if err := ensurePrivateDir(home); err != nil {
 		return false, err
@@ -146,6 +147,9 @@ func FirstRun(home, configPath, identityPath, storageDir, messagesDir string) (b
 		}
 		_ = os.Chmod(identityPath, 0o600)
 		created = true
+	}
+	if _, err := rnsnode.EnsureDefaultConfig(ResolveRNSConfigDir(rnsDir)); err != nil {
+		return false, err
 	}
 	return created, nil
 }
