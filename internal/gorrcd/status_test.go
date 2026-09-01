@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: 0BSD
 package gorrcd
 
-import "testing"
+import (
+	"testing"
+
+	"quad4/reticulum-go/pkg/interfaces"
+)
 
 func TestVersionLine(t *testing.T) {
 	old := BuildDate
@@ -14,6 +18,20 @@ func TestVersionLine(t *testing.T) {
 	want := Version + " (built 2026-08-14T12:00:00Z)"
 	if got := VersionLine(); got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestTransportSummarySharedInstanceName(t *testing.T) {
+	lc, err := interfaces.NewLocalClientInterface(0, "default", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	label, address := transportSummary(Config{}, []interfaces.Interface{lc})
+	if label != "Local shared instance" {
+		t.Fatalf("label=%q", label)
+	}
+	if address != "reticulum shared instance" {
+		t.Fatalf("address=%q", address)
 	}
 }
 

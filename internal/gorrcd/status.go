@@ -85,7 +85,7 @@ func transportSummary(cfg Config, ifaces []interfaces.Interface) (label, address
 	}
 	label = ifaces[0].GetName()
 	switch label {
-	case "LocalInterface":
+	case "Local shared instance", "LocalInterface":
 		address = "reticulum shared instance"
 	case "AutoInterface":
 		address = "multicast UDP"

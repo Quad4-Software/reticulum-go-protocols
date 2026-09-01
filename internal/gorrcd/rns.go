@@ -65,7 +65,7 @@ func startTransport(cfg Config, log *slog.Logger) (*transport.Transport, []inter
 	useUnix := common.SharedInstanceUsesUnix(rc.SharedInstanceType)
 	lc, err := interfaces.NewLocalClientInterface(common.DefaultSharedInstancePort, "default", useUnix, backbone.Get())
 	if err == nil {
-		if aerr := attach("LocalInterface", lc); aerr == nil {
+		if aerr := attach(lc.GetName(), lc); aerr == nil {
 			log.Info("attached to reticulum shared instance")
 			return tr, started, nil
 		}
