@@ -13,6 +13,7 @@ import (
 	"quad4/reticulum-go/pkg/debug"
 	"quad4/reticulum-go/pkg/destination"
 	"quad4/reticulum-go/pkg/identity"
+	"quad4/reticulum-go/pkg/profiler"
 )
 
 const (
@@ -48,7 +49,7 @@ func (t *Transport) InitializeRemoteManagement() error {
 
 	allowed := copyHashList(t.config.RemoteManagementAllowed)
 	if len(allowed) == 0 {
-		debug.Log(debug.DebugCritical, "Remote management enabled with empty ACL, request handlers not registered")
+		debug.Log(debug.DebugWarning, "Remote management enabled with empty ACL, request handlers not registered")
 	} else {
 		if err := dest.RegisterRequestHandlerAny(remoteManagementPathPath, t.remotePathHandler, destination.AllowList, allowed); err != nil {
 			return fmt.Errorf("remote /path handler: %w", err)
@@ -64,7 +65,7 @@ func (t *Transport) InitializeRemoteManagement() error {
 	t.mgmtDestinations = append(t.mgmtDestinations, dest)
 	t.mutex.Unlock()
 
-	debug.Log(debug.DebugCritical, "Enabled remote management",
+	debug.Log(debug.DebugInfo, "Enabled remote management",
 		"destination", fmt.Sprintf("%x", dest.GetHash()))
 	return nil
 }
@@ -167,6 +168,9 @@ func (t *Transport) remoteStatusHandler(_ string, data []byte, _ []byte, _ []byt
 	out := []any{t.GetInterfaceStatsRPC()}
 	if asBoolAny(list[0]) {
 		out = append(out, t.GetLinkCountRPC())
+	}
+	if len(list) >= 2 && asBoolAny(list[1]) {
+		out = append(out, profiler.ResultsOrNil())
 	}
 	return out
 }

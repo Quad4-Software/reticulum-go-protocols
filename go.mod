@@ -10,7 +10,7 @@ require (
 	golang.org/x/term v0.45.0
 	quad4/msgpack/v5 v5.8.2
 	quad4/pbt v0.0.0
-	quad4/reticulum-go v1.0.2
+	quad4/reticulum-go v1.1.1
 )
 
 require (
@@ -23,10 +23,10 @@ require (
 	github.com/quic-go/webtransport-go v0.11.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.bug.st/serial v1.8.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	quad4/bzip2 v0.0.0 // indirect
 	quad4/tagparser v0.0.0 // indirect
@@ -36,6 +36,6 @@ replace (
 	quad4/bzip2 => github.com/Quad4-Software/bzip2 v0.0.0-20260704225916-ca8b2bb66059
 	quad4/msgpack/v5 => github.com/Quad4-Software/msgpack/v5 v5.8.2
 	quad4/pbt => github.com/Quad4-Software/pbt v0.0.0-20260614183135-abe0cfc4e604
-	quad4/reticulum-go => github.com/Quad4-Software/Reticulum-Go v1.0.2
+	quad4/reticulum-go => github.com/Quad4-Software/Reticulum-Go v1.1.1
 	quad4/tagparser => github.com/Quad4-Software/tagparser v0.1.3-0.20260614183136-daa4d5f437ce
 )
