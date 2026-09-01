@@ -11,6 +11,7 @@ import (
 
 	"quad4/reticulum-go-protocols/pkg/lxst/sandbox"
 	"quad4/reticulum-go/pkg/common"
+	"quad4/reticulum-go/pkg/reticulumconfig"
 )
 
 const (
@@ -19,27 +20,60 @@ const (
 	scanBufMax     = 1024 * 1024
 )
 
-// LoadReticulumDir reads {dir}/config into a ReticulumConfig.
-func LoadReticulumDir(dir string) (*common.ReticulumConfig, error) {
+// ConfigFilePath returns {dir}/config, using DefaultConfigDir when dir is empty.
+func ConfigFilePath(dir string) (string, error) {
 	if dir == "" {
 		dir = DefaultConfigDir()
 		if dir == "" {
-			return nil, fmt.Errorf("no home directory")
+			return "", fmt.Errorf("no home directory")
 		}
 	}
-	path := filepath.Join(dir, "config")
+	return filepath.Join(dir, "config"), nil
+}
+
+// EnsureDefaultConfig writes a reticulum-go starter config at {dir}/config when
+// the file is missing. Returns true when a new file was created.
+func EnsureDefaultConfig(dir string) (bool, error) {
+	path, err := ConfigFilePath(dir)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := reticulumconfig.CreateDefaultConfig(path); err != nil {
+		return false, err
+	}
+	_ = os.Chmod(path, 0o600)
+	return true, nil
+}
+
+// LoadOfficialDir loads {dir}/config with reticulum-go's official parser.
+func LoadOfficialDir(dir string) (*common.ReticulumConfig, error) {
+	path, err := ConfigFilePath(dir)
+	if err != nil {
+		return nil, err
+	}
+	return reticulumconfig.LoadConfig(path)
+}
+
+// LoadReticulumDir reads {dir}/config into a ReticulumConfig.
+func LoadReticulumDir(dir string) (*common.ReticulumConfig, error) {
+	path, err := ConfigFilePath(dir)
+	if err != nil {
+		return nil, err
+	}
 	return LoadReticulumFile(path)
 }
 
 // LoadReticulumDirLenient reads {dir}/config and ignores sandbox control keys.
 func LoadReticulumDirLenient(dir string) (*common.ReticulumConfig, error) {
-	if dir == "" {
-		dir = DefaultConfigDir()
-		if dir == "" {
-			return nil, fmt.Errorf("no home directory")
-		}
+	path, err := ConfigFilePath(dir)
+	if err != nil {
+		return nil, err
 	}
-	path := filepath.Join(dir, "config")
 	return loadReticulumFile(path, true)
 }
 
@@ -181,6 +215,18 @@ func applyIfaceKey(ic *common.InterfaceConfig, key, val string) {
 		ic.Interface = val
 	case "kiss_framing":
 		ic.KISSFraming = parseYes(val)
+	case "group_id":
+		ic.GroupID = val
+	case "discovery_scope":
+		ic.DiscoveryScope = val
+	case "discovery_port":
+		if n, err := strconv.Atoi(val); err == nil {
+			ic.DiscoveryPort = n
+		}
+	case "data_port":
+		if n, err := strconv.Atoi(val); err == nil {
+			ic.DataPort = n
+		}
 	}
 }
 

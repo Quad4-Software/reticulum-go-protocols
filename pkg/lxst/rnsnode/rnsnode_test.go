@@ -131,6 +131,26 @@ func TestDefaultConfigDir(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaultConfig(t *testing.T) {
+	dir := t.TempDir()
+	created, err := rnsnode.EnsureDefaultConfig(dir)
+	if err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	cfg, err := rnsnode.LoadOfficialDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ic := cfg.Interfaces["Auto Discovery"]
+	if ic == nil || ic.Type != "AutoInterface" || !ic.Enabled {
+		t.Fatalf("interface=%+v", ic)
+	}
+	created2, err := rnsnode.EnsureDefaultConfig(dir)
+	if err != nil || created2 {
+		t.Fatalf("second created=%v err=%v", created2, err)
+	}
+}
+
 func TestStartUnknownKind(t *testing.T) {
 	if _, err := rnsnode.Start(rnsnode.Options{Kind: "serial"}); err == nil {
 		t.Fatal("expected error")

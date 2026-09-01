@@ -77,7 +77,14 @@ func Start(opts Options) (*Session, error) {
 }
 
 func startFromConfig(opts Options) (*Session, error) {
-	cfg, err := LoadReticulumDir(opts.ConfigDir)
+	dir := opts.ConfigDir
+	if dir == "" {
+		dir = DefaultConfigDir()
+	}
+	if _, err := EnsureDefaultConfig(dir); err != nil {
+		return nil, err
+	}
+	cfg, err := LoadOfficialDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +92,8 @@ func startFromConfig(opts Options) (*Session, error) {
 		cfg.InMemoryPathTable = false
 		cfg.InMemoryKnownDestinations = false
 	}
-	if cfg.ConfigPath == "" && opts.ConfigDir != "" {
-		cfg.ConfigPath = filepath.Join(opts.ConfigDir, "config")
+	if cfg.ConfigPath == "" && dir != "" {
+		cfg.ConfigPath = filepath.Join(dir, "config")
 	}
 	t, err := startTransport(cfg)
 	if err != nil {
