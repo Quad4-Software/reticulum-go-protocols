@@ -16,19 +16,18 @@ import (
 )
 
 // Receive implements inbound delivery for the lxmf.delivery destination.
-func (r *Router) Receive(pkt *packet.Packet, iface common.NetworkInterface) {
+func (r *Router) Receive(pkt *packet.Packet, iface common.NetworkInterface) bool {
 	if pkt == nil || r.deliveryDest == nil {
-		return
+		return false
 	}
 	if pkt.PacketType == packet.PacketTypeLinkReq {
-		r.deliveryDest.Receive(pkt, iface)
-		return
+		return r.deliveryDest.Receive(pkt, iface)
 	}
 
 	plaintext, err := r.decryptDelivery(pkt.Data)
 	if err != nil {
 		Warning("router delivery decrypt failed", "error", err)
-		return
+		return false
 	}
 	_ = sendDeliveryProof(r.deliveryDest, pkt, iface)
 
@@ -40,6 +39,7 @@ func (r *Router) Receive(pkt *packet.Packet, iface common.NetworkInterface) {
 		method = MethodDirect
 	}
 	r.handleDeliveryPayload(lxmfData, method, false, false)
+	return true
 }
 
 func (r *Router) deliveryLinkEstablished(v any) {

@@ -272,20 +272,19 @@ func (m *Messenger) SendStampedPropagated(msg *LXMessage, propNodeHash []byte, s
 
 // Receive implements inbound delivery for the lxmf.delivery destination, decrypts,
 // sends a delivery proof to the sender, and dispatches the LXMF payload.
-func (m *Messenger) Receive(pkt *packet.Packet, iface common.NetworkInterface) {
+func (m *Messenger) Receive(pkt *packet.Packet, iface common.NetworkInterface) bool {
 	if pkt == nil {
-		return
+		return false
 	}
 	if pkt.PacketType == packet.PacketTypeLinkReq {
-		m.dest.Receive(pkt, iface)
-		return
+		return m.dest.Receive(pkt, iface)
 	}
 
 	plaintext, err := m.decryptInbound(pkt.Data)
 	if err != nil {
 		Warning("inbound lxmf decrypt failed", "error", err, "packet_len", len(pkt.Data))
 		m.receiveError(fmt.Errorf("decrypt: %w", err))
-		return
+		return false
 	}
 
 	if err := sendDeliveryProof(m.dest, pkt, iface); err != nil {
@@ -293,6 +292,7 @@ func (m *Messenger) Receive(pkt *packet.Packet, iface common.NetworkInterface) {
 	}
 
 	m.onPacket(plaintext, iface)
+	return true
 }
 
 // EnableRatchets enables destination ratchet keys for inbound decryption and persistence.

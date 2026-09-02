@@ -12,17 +12,11 @@ import (
 	"quad4/reticulum-go/pkg/common"
 	"quad4/reticulum-go/pkg/cryptography"
 	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/interfaces"
 	"quad4/reticulum-go/pkg/packet"
 	"quad4/reticulum-go/pkg/transport"
 )
 
-const (
-	udp1              = "UDPL1"
-	udp2              = "UDPL2"
-	loopback          = "127.0.0.1:0"
-	pathEstablishWait = 10 * time.Second
-)
+const pathEstablishWait = 10 * time.Second
 
 func TestMessenger_Compose(t *testing.T) {
 	cfg := common.DefaultConfig()
@@ -102,78 +96,9 @@ func TestMessenger_TwoWayLoopback(t *testing.T) {
 		t.Skip("loopback messenger test skipped in -short mode")
 	}
 
-	cfg1 := common.DefaultConfig()
-	cfg1.Interfaces = map[string]*common.InterfaceConfig{
-		udp1: {Type: "UDPInterface", Enabled: true, Address: loopback, TargetHost: loopback, Name: udp1},
-	}
-	cfg2 := common.DefaultConfig()
-	cfg2.Interfaces = map[string]*common.InterfaceConfig{
-		udp2: {Type: "UDPInterface", Enabled: true, Address: loopback, TargetHost: loopback, Name: udp2},
-	}
-
-	tr1 := transport.NewTransport(cfg1)
-	tr2 := transport.NewTransport(cfg2)
-	if err := tr1.Start(); err != nil {
-		t.Fatalf("tr1.Start: %v", err)
-	}
-	defer tr1.Close()
-	if err := tr2.Start(); err != nil {
-		t.Fatalf("tr2.Start: %v", err)
-	}
-	defer tr2.Close()
-
-	addr1 := "127.0.0.1:42440"
-	addr2 := "127.0.0.1:42441"
-
-	var iface1 interfaces.Interface
-	iface1, err := interfaces.NewUDPInterface(udp1, addr1, addr2, true)
-	if err != nil {
-		t.Fatalf("iface1: %v", err)
-	}
-	iface1.SetPacketCallback(func(d []byte, ni common.NetworkInterface) { tr1.HandlePacket(d, ni) })
-	if err := iface1.Start(); err != nil {
-		t.Fatalf("iface1.Start: %v", err)
-	}
-	defer iface1.Stop()
-	if ni, ok := iface1.(common.NetworkInterface); ok {
-		if err := tr1.RegisterInterface(udp1, ni); err != nil {
-			t.Fatalf("register iface1: %v", err)
-		}
-	}
-
-	var iface2 interfaces.Interface
-	iface2, err = interfaces.NewUDPInterface(udp2, addr2, addr1, true)
-	if err != nil {
-		t.Fatalf("iface2: %v", err)
-	}
-	iface2.SetPacketCallback(func(d []byte, ni common.NetworkInterface) { tr2.HandlePacket(d, ni) })
-	if err := iface2.Start(); err != nil {
-		t.Fatalf("iface2.Start: %v", err)
-	}
-	defer iface2.Stop()
-	if ni, ok := iface2.(common.NetworkInterface); ok {
-		if err := tr2.RegisterInterface(udp2, ni); err != nil {
-			t.Fatalf("register iface2: %v", err)
-		}
-	}
-
-	id1, _ := identity.NewIdentity()
-	id2, _ := identity.NewIdentity()
-
-	dest1, err := NewDeliveryDestination(id1, tr1)
-	if err != nil {
-		t.Fatalf("dest1: %v", err)
-	}
-	dest2, err := NewDeliveryDestination(id2, tr2)
-	if err != nil {
-		t.Fatalf("dest2: %v", err)
-	}
-
-	identity.Remember(nil, dest1.GetHash(), id1.GetPublicKey(), nil)
-	identity.Remember(nil, dest2.GetHash(), id2.GetPublicKey(), nil)
-
-	m1 := NewMessenger(tr1, dest1)
-	m2 := NewMessenger(tr2, dest2)
+	mesh := newLXMFMesh(t, 42440)
+	m1, m2 := mesh.m1, mesh.m2
+	dest1, dest2 := mesh.h1, mesh.h2
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -187,30 +112,12 @@ func TestMessenger_TwoWayLoopback(t *testing.T) {
 		wg.Done()
 	})
 
-	if err := dest1.Announce(false, nil, nil); err != nil {
-		t.Fatalf("announce 1: %v", err)
-	}
-	if err := dest2.Announce(false, nil, nil); err != nil {
-		t.Fatalf("announce 2: %v", err)
-	}
+	t.Logf("paths established d1=%s d2=%s", hex.EncodeToString(dest1), hex.EncodeToString(dest2))
 
-	deadline := time.Now().Add(pathEstablishWait)
-	for {
-		if tr1.HasPath(dest2.GetHash()) && tr2.HasPath(dest1.GetHash()) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout establishing paths")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	t.Logf("paths established d1=%s d2=%s", hex.EncodeToString(dest1.GetHash()), hex.EncodeToString(dest2.GetHash()))
-
-	if _, err := m1.SendText(dest2.GetHash(), "from1", "hello two"); err != nil {
+	if _, err := m1.SendText(dest2, "from1", "hello two"); err != nil {
 		t.Fatalf("send 1->2: %v", err)
 	}
-	if _, err := m2.SendText(dest1.GetHash(), "from2", "hello one"); err != nil {
+	if _, err := m2.SendText(dest1, "from2", "hello one"); err != nil {
 		t.Fatalf("send 2->1: %v", err)
 	}
 
@@ -249,6 +156,9 @@ func TestMessenger_RatchetEncryptedInbound(t *testing.T) {
 	}
 	m := NewMessenger(tr, dest)
 
+	if _, err := id.RotateRatchet(); err != nil {
+		t.Fatalf("RotateRatchet: %v", err)
+	}
 	ratchetPriv := id.GetCurrentRatchetKey()
 	if ratchetPriv == nil {
 		t.Fatal("expected identity ratchet key")
