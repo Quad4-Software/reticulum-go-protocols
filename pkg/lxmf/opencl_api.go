@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: 0BSD
 
-//go:build (linux || darwin || windows) && !lxstamp_nogpu
+//go:build (linux || darwin) && (amd64 || arm64) && !lxstamp_nogpu
 
 package lxmf
 
