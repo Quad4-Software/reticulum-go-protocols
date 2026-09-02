@@ -209,7 +209,7 @@ func (c *Conn) dispatch(env *proto.Envelope) {
 		if h := c.ep.cfg.Handlers.OnBye; h != nil {
 			h(c)
 		}
-		c.Close()
+		_ = c.Close()
 	default:
 		if c.localCaps.StrictExt || c.ep.cfg.StrictExtensions {
 			_ = c.sendReject(proto.RejectUnknown, "unknown type")

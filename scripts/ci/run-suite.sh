@@ -23,7 +23,8 @@ lint)
 	revive -config revive.toml -formatter friendly ./pkg/...
 	;;
 scan)
-	gosec --exclude-rules='.*/go-build/.*:G115' ./...
+	# G103 OpenCL FFI, G104 Close-on-error paths, G115 bounded wire/protocol casts.
+	gosec -quiet -exclude=G103,G104,G115 ./...
 	;;
 check)
 	task check

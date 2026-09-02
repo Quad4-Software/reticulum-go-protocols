@@ -132,11 +132,11 @@ func (ep *Endpoint) Dial(peerHash []byte) (*Conn, error) {
 	// Brief settle so the peer can attach inbound callbacks before HELLO.
 	time.Sleep(20 * time.Millisecond)
 	if err := conn.sendHello(); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	if err := conn.waitHello(ep.cfg.HelloTimeout); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	return conn, nil
