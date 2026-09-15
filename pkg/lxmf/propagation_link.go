@@ -211,28 +211,12 @@ func (m *Messenger) sendPropagationPayload(lnk *link.Link, payload []byte) error
 	if err != nil {
 		return fmt.Errorf("propagation resource: %w", err)
 	}
+	// SendResource blocks until the receiver proof arrives, so a nil return
+	// means the transfer completed. The resource status field is only updated
+	// for inbound transfers, so it must not be polled here.
 	if err := lnk.SendResource(res); err != nil {
 		return fmt.Errorf("propagation link resource: %w", err)
 	}
-
-	deadline := time.Now().Add(5 * time.Minute)
-	lastLog := time.Time{}
-	for {
-		status := res.GetStatus()
-		switch status {
-		case resource.StatusComplete:
-			Info("propagation resource complete", "bytes", len(payload))
-			return nil
-		case resource.StatusFailed, resource.StatusCancelled:
-			return errors.New("propagation resource transfer failed")
-		}
-		if time.Now().After(deadline) {
-			return errors.New("propagation resource transfer timeout")
-		}
-		if time.Since(lastLog) >= propagationStatusInterval {
-			Verbose("propagation resource in progress", "status", status, "progress", res.GetProgress())
-			lastLog = time.Now()
-		}
-		time.Sleep(pathPollInterval)
-	}
+	Info("propagation resource complete", "bytes", len(payload))
+	return nil
 }

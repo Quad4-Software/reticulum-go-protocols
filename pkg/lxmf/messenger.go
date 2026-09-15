@@ -2,6 +2,7 @@
 package lxmf
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -46,8 +47,43 @@ func NewMessenger(t *transport.Transport, d *destination.Destination) *Messenger
 		resolver:  RecallSource,
 	}
 	d.SetPacketCallback(m.onPacket)
+	d.SetLinkEstablishedCallback(m.onLinkEstablished)
 	t.RegisterDestination(d.GetHash(), m)
 	return m
+}
+
+// onLinkEstablished wires inbound direct-delivery links: link packets carry
+// the packed LXMF payload and resources are accepted up to a sane bound.
+func (m *Messenger) onLinkEstablished(v any) {
+	lnk, ok := v.(*link.Link)
+	if !ok || lnk == nil {
+		return
+	}
+	_ = lnk.SetResourceStrategy(link.AcceptApp)
+	lnk.SetPacketCallback(func(data []byte, _ *packet.Packet) {
+		m.onPacket(m.directInner(data), nil)
+	})
+	lnk.SetResourceCallback(func(adv any) bool {
+		return resourceAdvertisedSize(adv) <= int64(LinkPacketMaxContent)*16
+	})
+	lnk.SetResourceConcludedCallback(func(res any) {
+		if data := extractResourceData(res); len(data) > 0 {
+			m.onPacket(m.directInner(data), nil)
+		}
+	})
+}
+
+// directInner strips the destination hash prefix from link-delivered LXMF
+// payloads. Direct deliveries carry the full packed message on the wire,
+// while onPacket expects the inner source, signature, and payload.
+func (m *Messenger) directInner(data []byte) []byte {
+	if len(data) <= DestinationLength {
+		return nil
+	}
+	if !bytes.Equal(data[:DestinationLength], m.DestinationHash()) {
+		return nil
+	}
+	return data[DestinationLength:]
 }
 
 // NewDeliveryDestination returns the inbound lxmf.delivery destination for id.
@@ -293,6 +329,13 @@ func (m *Messenger) Receive(pkt *packet.Packet, iface common.NetworkInterface) b
 
 	m.onPacket(plaintext, iface)
 	return true
+}
+
+// HandleIncomingLinkRequest delegates link requests to the wrapped
+// destination. The messenger registers itself as the transport destination,
+// so without this inbound link requests for direct delivery are dropped.
+func (m *Messenger) HandleIncomingLinkRequest(pkt any, tr any, iface common.NetworkInterface) error {
+	return m.dest.HandleIncomingLinkRequest(pkt, tr, iface)
 }
 
 // EnableRatchets enables destination ratchet keys for inbound decryption and persistence.
