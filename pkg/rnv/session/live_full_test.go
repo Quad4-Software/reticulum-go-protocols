@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
-	"quad4/reticulum-go-protocols/pkg/rnv/session"
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/session"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 func TestLiveClipAndAudioVideo(t *testing.T) {

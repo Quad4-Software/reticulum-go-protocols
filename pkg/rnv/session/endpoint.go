@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
-	"quad4/reticulum-go/pkg/destination"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/link"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 // Endpoint listens for and dials RNV sessions on rnv.media.

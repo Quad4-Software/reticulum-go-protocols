@@ -4,8 +4,8 @@ package call_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/call"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/call"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestOracleDefaultConfigMatchesLXST(t *testing.T) {

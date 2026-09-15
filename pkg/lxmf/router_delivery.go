@@ -9,10 +9,10 @@ import (
 	"os/exec"
 	"time"
 
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/link"
-	"quad4/reticulum-go/pkg/packet"
-	"quad4/reticulum-go/pkg/resource"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/packet"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/resource"
 )
 
 // Receive implements inbound delivery for the lxmf.delivery destination.

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/phonebook"
-	"quad4/reticulum-go-protocols/pkg/lxst/sounds"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/phonebook"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sounds"
 )
 
 func TestInstallCopiesRingtonesAndConfig(t *testing.T) {

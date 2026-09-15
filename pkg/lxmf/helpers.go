@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"quad4/msgpack/v5/pkg/msgpack"
-	"quad4/msgpack/v5/pkg/msgpack/msgpcode"
+	"github.com/Quad4-Software/msgpack/v5/pkg/msgpack"
+	"github.com/Quad4-Software/msgpack/v5/pkg/msgpack/msgpcode"
 )
 
 // DisplayNameFromAppData returns the announce display name (legacy UTF-8 or v0.5.0+ msgpack).

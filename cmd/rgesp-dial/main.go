@@ -8,14 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"quad4/reticulum-go-protocols/internal/lxstcli"
-	"quad4/reticulum-go-protocols/pkg/lxst/call"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
-	"quad4/reticulum-go-protocols/pkg/lxst/rnsnode"
-	"quad4/reticulum-go-protocols/pkg/lxst/sandbox"
-	"quad4/reticulum-go/pkg/debug"
-	"quad4/reticulum-go/pkg/destination"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/internal/lxstcli"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/call"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sandbox"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 var (

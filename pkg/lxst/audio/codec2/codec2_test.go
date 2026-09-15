@@ -4,8 +4,8 @@ package codec2_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/codec2"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/codec2"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestCodec2RoundTrip(t *testing.T) {

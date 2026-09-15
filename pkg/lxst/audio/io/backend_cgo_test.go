@@ -6,7 +6,7 @@ package io_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
 )
 
 func TestBackendMiniaudio(t *testing.T) {

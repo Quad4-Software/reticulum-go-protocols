@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/rnsnode"
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 func TestStartUDP(t *testing.T) {

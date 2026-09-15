@@ -4,7 +4,7 @@ package proto_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
 func TestPropertyMinProfile(t *testing.T) {

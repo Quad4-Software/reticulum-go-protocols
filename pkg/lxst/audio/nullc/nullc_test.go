@@ -4,7 +4,7 @@ package nullc_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/nullc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/nullc"
 )
 
 func TestNullRoundTrip(t *testing.T) {

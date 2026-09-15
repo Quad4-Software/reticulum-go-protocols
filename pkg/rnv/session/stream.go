@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
 // Stream is an accepted live media session on a Conn.

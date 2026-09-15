@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxmf"
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 func TestUnverifiedDelivered(t *testing.T) {

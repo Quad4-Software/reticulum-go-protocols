@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rrc"
-	"quad4/reticulum-go/pkg/interfaces"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/interfaces"
 )
 
 // OperatorSummary is a concise operator-facing status snapshot.

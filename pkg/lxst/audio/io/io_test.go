@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
 )
 
 func TestRaceNullDevice(t *testing.T) {

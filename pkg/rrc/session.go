@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"quad4/reticulum-go/pkg/link"
-	"quad4/reticulum-go/pkg/packet"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/packet"
 )
 
 // session wraps a single Reticulum Link for RRC framed I/O.

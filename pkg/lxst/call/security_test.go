@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestIdentifyTimeoutEndsConnectingCall(t *testing.T) {

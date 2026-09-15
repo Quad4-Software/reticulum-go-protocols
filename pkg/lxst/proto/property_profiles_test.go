@@ -4,8 +4,8 @@ package proto_test
 import (
 	"testing"
 
-	"quad4/pbt/pkg/pbt"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/pbt/pkg/pbt"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 var propertyProfiles = []int{

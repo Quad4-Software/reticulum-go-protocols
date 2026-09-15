@@ -2,7 +2,7 @@
 package rnv
 
 import (
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
 // UseCase selects which Reticulum media stack to prefer.

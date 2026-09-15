@@ -2,11 +2,11 @@
 package call
 
 import (
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/codec2"
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/nullc"
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/raw"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/codec2"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/nullc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/raw"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func newProfileEncoder(params proto.CodecParams) (opus.Encoder, error) {

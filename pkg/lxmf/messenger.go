@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/destination"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/link"
-	"quad4/reticulum-go/pkg/packet"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/packet"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 // MessageHandler receives one unpacked inbound LXMessage per packet (signature state is on msg).

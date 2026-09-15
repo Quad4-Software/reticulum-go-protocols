@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"quad4/reticulum-go-protocols/pkg/lxmf"
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 // SelfCheckOptions configures local validation.

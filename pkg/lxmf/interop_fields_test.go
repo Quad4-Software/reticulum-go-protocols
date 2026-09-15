@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 func assertInteropFieldKeys(t *testing.T, fields map[string]any, want []byte) {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"quad4/reticulum-go-protocols/internal/lxstcli"
+	"github.com/Quad4-Software/reticulum-go-protocols/internal/lxstcli"
 )
 
 func resolveConfigDir(explicit string) (string, error) {

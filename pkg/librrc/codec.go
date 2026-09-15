@@ -4,7 +4,7 @@ package librrc
 import (
 	"fmt"
 
-	"quad4/reticulum-go-protocols/pkg/rrc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
 )
 
 type envelopeRecord struct {

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"quad4/pbt/pkg/pbt"
-	"quad4/reticulum-go-protocols/pkg/lxst/media"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/pbt/pkg/pbt"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/media"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestPropertyInOrderPop(t *testing.T) {

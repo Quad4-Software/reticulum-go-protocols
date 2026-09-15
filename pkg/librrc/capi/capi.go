@@ -37,7 +37,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"quad4/reticulum-go-protocols/pkg/librrc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/librrc"
 )
 
 const maxCGoBytes = math.MaxInt32

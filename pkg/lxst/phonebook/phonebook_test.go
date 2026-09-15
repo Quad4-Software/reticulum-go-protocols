@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/phonebook"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/phonebook"
 )
 
 func TestRaceAllowAndAdd(t *testing.T) {

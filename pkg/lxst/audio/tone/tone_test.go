@@ -4,7 +4,7 @@ package tone_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/tone"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/tone"
 )
 
 func TestFillNotSilent(t *testing.T) {

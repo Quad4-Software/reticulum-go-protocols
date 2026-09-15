@@ -41,8 +41,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 // Native reports whether this build talks to libcodec2.

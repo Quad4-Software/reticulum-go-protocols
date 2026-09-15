@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/rrc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
 )
 
 func TestAcceptance_1_DefaultHubNameIsRrc(t *testing.T) {

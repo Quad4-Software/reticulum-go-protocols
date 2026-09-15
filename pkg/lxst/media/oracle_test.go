@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/media"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/media"
 )
 
 func TestOracleReorderThenPlay(t *testing.T) {

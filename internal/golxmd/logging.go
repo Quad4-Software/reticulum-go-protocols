@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"quad4/reticulum-go-protocols/pkg/lxmf"
-	"quad4/reticulum-go-protocols/pkg/lxst/rnsnode"
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/debug"
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 type LogConfig struct {

@@ -7,8 +7,8 @@ import (
 	"image"
 	_ "image/jpeg"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
 // SendStill sends a JPEG (or registered codec) still image.

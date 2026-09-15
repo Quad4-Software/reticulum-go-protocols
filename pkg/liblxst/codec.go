@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func PackSignalling(signals []int) ([]byte, int) {

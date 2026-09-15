@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
-	"quad4/reticulum-go-protocols/pkg/rnv/session"
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/interfaces"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/session"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/interfaces"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 func TestAdversarialClipWithoutAccept(t *testing.T) {

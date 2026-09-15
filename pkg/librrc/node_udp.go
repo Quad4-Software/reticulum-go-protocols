@@ -4,8 +4,8 @@ package librrc
 import (
 	"fmt"
 
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/interfaces"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/interfaces"
 )
 
 func NodeAddUDPInterface(nodeHandle uint64, name, localAddr, peerAddr string) int {

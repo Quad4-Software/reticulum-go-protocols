@@ -5,9 +5,9 @@ import (
 	"context"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
-	"quad4/reticulum-go/pkg/resource"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/resource"
 )
 
 const largeClipProgressThreshold = 1 << 20

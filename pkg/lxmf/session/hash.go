@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"quad4/reticulum-go-protocols/pkg/lxmf"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 )
 
 const hashGroup = 4

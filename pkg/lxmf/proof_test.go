@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"testing"
 
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/packet"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/packet"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 type stubIface struct {

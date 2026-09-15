@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/sandbox"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sandbox"
 )
 
 func loadConfigFile(path string) (map[string]string, error) {

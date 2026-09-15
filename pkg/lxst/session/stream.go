@@ -10,7 +10,7 @@ import (
 	stdio "io"
 	"sync"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
 )
 
 // Attach copies host PCM over rw. The stream is local, not a mesh hop.

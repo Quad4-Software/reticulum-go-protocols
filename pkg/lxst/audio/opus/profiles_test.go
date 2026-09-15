@@ -4,8 +4,8 @@ package opus_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestAllOpusProfilesRoundTrip(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"quad4/reticulum-go-protocols/pkg/lxmf"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 )
 
 func main() {

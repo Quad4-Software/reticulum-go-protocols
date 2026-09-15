@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"quad4/msgpack/v5/pkg/msgpack"
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/msgpack/v5/pkg/msgpack"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 func TestPeerSkipsOwnPropagationHash(t *testing.T) {

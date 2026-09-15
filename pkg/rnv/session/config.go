@@ -4,8 +4,8 @@ package session
 import (
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
 // Config configures an RNV endpoint. Prefer SafeConfig.

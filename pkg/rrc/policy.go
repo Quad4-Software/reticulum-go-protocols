@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: 0BSD
 package rrc
 
-import "quad4/reticulum-go/pkg/link"
+import "github.com/Quad4-Software/Reticulum-Go/pkg/link"
 
 // HubPolicy is optional hub-side policy used by gorrcd.
 // A nil policy keeps library defaults (open rooms, no slash commands).

@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/phonebook"
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/phonebook"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 const fingerprintGroup = 4

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/librrc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/librrc"
 )
 
 func TestHubClientLoopback(t *testing.T) {

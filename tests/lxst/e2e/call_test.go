@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/call"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
-	"quad4/reticulum-go/pkg/common"
-	"quad4/reticulum-go/pkg/destination"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/call"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
 type pairIface struct {

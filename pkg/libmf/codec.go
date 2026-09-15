@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"quad4/reticulum-go-protocols/pkg/mf"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/mf"
 )
 
 const (

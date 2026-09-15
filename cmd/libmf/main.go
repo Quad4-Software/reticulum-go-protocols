@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: 0BSD
 package main
 
-import _ "quad4/reticulum-go-protocols/pkg/libmf/capi"
+import _ "github.com/Quad4-Software/reticulum-go-protocols/pkg/libmf/capi"
 
 func main() {}

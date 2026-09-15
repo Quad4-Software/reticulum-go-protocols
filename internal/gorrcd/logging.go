@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/rnsnode"
-	"quad4/reticulum-go/pkg/debug"
-	"quad4/reticulum-go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 func ConfigureLogging(cfg Config) (*slog.Logger, io.Closer, error) {

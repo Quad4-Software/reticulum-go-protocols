@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/sandbox"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sandbox"
 )
 
 const (

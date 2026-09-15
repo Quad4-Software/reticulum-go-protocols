@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/io"
-	"quad4/reticulum-go-protocols/pkg/lxst/call"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/call"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 type Info struct {

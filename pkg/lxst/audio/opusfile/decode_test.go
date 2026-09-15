@@ -4,7 +4,7 @@ package opusfile_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opusfile"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opusfile"
 )
 
 func TestFillLoops(t *testing.T) {

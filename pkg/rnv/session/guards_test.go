@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/rnv"
-	"quad4/reticulum-go-protocols/pkg/rnv/proto"
-	"quad4/reticulum-go-protocols/pkg/rnv/session"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/session"
 )
 
 func TestGuardLowVideo(t *testing.T) {

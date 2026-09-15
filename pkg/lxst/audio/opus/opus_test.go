@@ -4,7 +4,7 @@ package opus_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
 )
 
 func TestEncoderDecoderRoundTrip(t *testing.T) {

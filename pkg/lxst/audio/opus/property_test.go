@@ -5,8 +5,8 @@ import (
 	"math/rand"
 	"testing"
 
-	"quad4/pbt/pkg/pbt"
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
+	"github.com/Quad4-Software/pbt/pkg/pbt"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
 )
 
 func TestPropertyEncodeNeverEmptyOnPCM(t *testing.T) {

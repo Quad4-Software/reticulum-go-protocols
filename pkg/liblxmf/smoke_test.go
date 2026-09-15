@@ -4,7 +4,7 @@ package liblxmf_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/liblxmf"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/liblxmf"
 )
 
 func TestLXMFCodecRoundTrip(t *testing.T) {

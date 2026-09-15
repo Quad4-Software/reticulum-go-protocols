@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/rnv/source"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/source"
 )
 
 func TestFuncSourceSink(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/rnv/media"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/media"
 )
 
 func TestJitterReorder(t *testing.T) {

@@ -4,8 +4,8 @@ package liblxst_test
 import (
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/liblxst"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/liblxst"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestLXSTCodecRoundTrip(t *testing.T) {

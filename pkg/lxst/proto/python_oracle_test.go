@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"testing"
 
-	"quad4/reticulum-go-protocols/internal/lxsttest"
-	"quad4/reticulum-go-protocols/pkg/lxst/phonebook"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/internal/lxsttest"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/phonebook"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 type pythonOracle struct {

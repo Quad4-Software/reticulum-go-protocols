@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/history"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/history"
 )
 
 func TestRaceRecordRecent(t *testing.T) {

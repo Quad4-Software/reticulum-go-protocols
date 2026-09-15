@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"quad4/reticulum-go-protocols/internal/lxsttest"
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/codec2"
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/reticulum-go-protocols/internal/lxsttest"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/codec2"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 func TestCodec2WirePythonDecode(t *testing.T) {

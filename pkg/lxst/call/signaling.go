@@ -4,11 +4,11 @@ package call
 import (
 	"context"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/proto"
-	"quad4/reticulum-go/pkg/debug"
-	"quad4/reticulum-go/pkg/identity"
-	"quad4/reticulum-go/pkg/link"
-	"quad4/reticulum-go/pkg/packet"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/packet"
 )
 
 func (c *Call) resendAvailableUntilIdentified() {

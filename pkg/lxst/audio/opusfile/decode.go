@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opus"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
 )
 
 const decodeFrame = 5760

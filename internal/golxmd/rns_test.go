@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"quad4/reticulum-go/pkg/debug"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
 )
 
 func TestAttachFromRNSConfigLoadsTCPClients(t *testing.T) {

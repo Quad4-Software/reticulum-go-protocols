@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/rrc"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
 )
 
 func TestRace_AllowJoinAndFlags(t *testing.T) {

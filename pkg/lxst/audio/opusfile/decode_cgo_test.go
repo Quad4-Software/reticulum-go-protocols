@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"quad4/reticulum-go-protocols/pkg/lxst/audio/opusfile"
-	"quad4/reticulum-go-protocols/pkg/lxst/sounds"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opusfile"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sounds"
 )
 
 func TestDecodeRinger(t *testing.T) {

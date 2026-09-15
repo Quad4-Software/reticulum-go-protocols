@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"quad4/msgpack/v5/pkg/msgpack"
+	"github.com/Quad4-Software/msgpack/v5/pkg/msgpack"
 )
 
 // Container is msgpack packed_container metadata plus raw LXMF bytes (wire-compatible with upstream).

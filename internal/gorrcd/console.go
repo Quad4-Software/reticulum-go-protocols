@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"quad4/reticulum-go/pkg/term"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/term"
 )
 
 const (

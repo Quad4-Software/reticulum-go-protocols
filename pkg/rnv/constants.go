@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: 0BSD
 package rnv
 
-import "quad4/reticulum-go-protocols/pkg/rnv/proto"
+import "github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 
 const (
 	AppName         = proto.AppName
