@@ -8,12 +8,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/mf"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/interfaces"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/mf"
 )
 
 const (

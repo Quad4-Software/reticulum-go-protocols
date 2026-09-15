@@ -15,13 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
 	rnsdebug "github.com/Quad4-Software/Reticulum-Go/pkg/debug"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/interfaces"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/reticulumconfig"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 )
 
 const (

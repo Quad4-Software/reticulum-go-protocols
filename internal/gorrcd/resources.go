@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/resource"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
 )
 
 type expectation struct {

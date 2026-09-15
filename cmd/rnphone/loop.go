@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/call"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/history"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/phonebook"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
-	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
-	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
 const (

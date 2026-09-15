@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf/session"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf/session"
 )
 
 type pairIface struct {

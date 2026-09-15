@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"golang.org/x/term"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/call"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
+	"golang.org/x/term"
 )
 
 func stdinFd() int {

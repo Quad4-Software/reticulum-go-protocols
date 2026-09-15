@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
 const (

@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 )
 
 const (

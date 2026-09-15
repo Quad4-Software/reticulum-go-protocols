@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Quad4-Software/msgpack/v5/pkg/msgpack"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/msgpack/v5/pkg/msgpack"
 )
 
 func TestAdversarial_TrailingJunkAfterStampedPayloadRejected(t *testing.T) {

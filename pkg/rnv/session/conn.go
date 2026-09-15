@@ -8,12 +8,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/media"
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/packet"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/resource"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/media"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
 // Conn is an established RNV session after HELLO exchange (or while awaiting it).

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 )
 
 func TestBlackBox_PublicAPI_PackUnpack(t *testing.T) {

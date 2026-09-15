@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/backbone"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/common"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/interfaces"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
+	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
 )
 
 type TransportConfig struct {

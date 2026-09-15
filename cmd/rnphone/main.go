@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
 	"github.com/Quad4-Software/reticulum-go-protocols/internal/lxstcli"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
@@ -20,8 +22,6 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/rnsnode"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sandbox"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/sounds"
-	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
-	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
 )
 
 const (

@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/filter"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/io"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
@@ -13,7 +14,6 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/tone"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/media"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
-	"github.com/Quad4-Software/Reticulum-Go/pkg/debug"
 )
 
 func (c *Call) openPipelines() error {
