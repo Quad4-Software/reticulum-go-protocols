@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/Quad4-Software/Reticulum-Go v1.1.2-0.20260915034538-6c079df83b52
 	github.com/Quad4-Software/msgpack/v5 v5.9.1
-	github.com/Quad4-Software/pbt v1.0.1
+	github.com/Quad4-Software/pbt v1.0.2
 	github.com/ebitengine/purego v0.11.0
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/landlock-lsm/go-landlock v0.10.0

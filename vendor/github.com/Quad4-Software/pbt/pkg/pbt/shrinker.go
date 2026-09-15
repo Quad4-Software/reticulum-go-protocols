@@ -2,7 +2,12 @@
 // Copyright (c) 2026 Quad4
 package pbt
 
-import "strings"
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
 
 // Shrinker attempts to minimize a failing value while preserving failure.
 type Shrinker[T any] interface {
@@ -445,4 +450,94 @@ func (s tuple3Shrinker[A, B, C]) Shrink(value Tuple3Value[A, B, C], predicate Pr
 	}
 
 	return candidate, changed
+}
+
+// MapShrinker returns a shrinker that removes entries from failing maps. Keys
+// are visited in a sorted order so shrinking stays deterministic; the sort
+// uses each key's fmt rendering, which is stable for comparable keys.
+func MapShrinker[K comparable, V any]() Shrinker[map[K]V] {
+	return mapShrinker[K, V]{}
+}
+
+// DurationShrinkerToward shrinks time.Duration values toward a target.
+func DurationShrinkerToward(target time.Duration) Shrinker[time.Duration] {
+	inner := intTargetShrinker[int64]{target: int64(target)}
+	return ShrinkerFunc[time.Duration](func(value time.Duration, predicate Predicate[time.Duration]) (time.Duration, bool) {
+		shrunk, changed := inner.Shrink(int64(value), func(d int64) bool {
+			return predicate(time.Duration(d))
+		})
+		return time.Duration(shrunk), changed
+	})
+}
+
+// PtrShrinker shrinks pointer values: nil is tried first, then the pointed-to
+// value is shrunk with the element shrinker when one is available.
+func PtrShrinker[T any](elem Shrinker[T]) Shrinker[*T] {
+	return ptrShrinker[T]{elem: elem}
+}
+
+// filterShrinker wraps a shrinker so candidates that fail the filter are
+// treated as passing, which keeps filtered generators (SuchThat) inside their
+// domain while shrinking.
+func filterShrinker[T any](inner Shrinker[T], filter Predicate[T]) Shrinker[T] {
+	if inner == nil {
+		return nil
+	}
+	return ShrinkerFunc[T](func(value T, predicate Predicate[T]) (T, bool) {
+		return inner.Shrink(value, func(candidate T) bool {
+			return !filter(candidate) || predicate(candidate)
+		})
+	})
+}
+
+type mapShrinker[K comparable, V any] struct{}
+
+func (s mapShrinker[K, V]) Shrink(value map[K]V, predicate Predicate[map[K]V]) (map[K]V, bool) {
+	if predicate(value) || len(value) == 0 {
+		return value, false
+	}
+
+	keys := make([]K, 0, len(value))
+	for k := range value {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+	})
+
+	for _, k := range keys {
+		trial := make(map[K]V, len(value)-1)
+		for key, v := range value {
+			if key != k {
+				trial[key] = v
+			}
+		}
+		if !predicate(trial) {
+			return s.Shrink(trial, predicate)
+		}
+	}
+	return value, false
+}
+
+type ptrShrinker[T any] struct {
+	elem Shrinker[T]
+}
+
+func (s ptrShrinker[T]) Shrink(value *T, predicate Predicate[*T]) (*T, bool) {
+	if predicate(value) || value == nil {
+		return value, false
+	}
+	if !predicate(nil) {
+		return nil, true
+	}
+	if s.elem == nil {
+		return value, false
+	}
+	shrunk, changed := s.elem.Shrink(*value, func(elem T) bool {
+		return predicate(&elem)
+	})
+	if changed {
+		return &shrunk, true
+	}
+	return value, false
 }

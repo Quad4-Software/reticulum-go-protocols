@@ -31,6 +31,9 @@ func Check[T any](t TestingT, property Property[T], opts ...Option) {
 func CheckResult[T any](property Property[T], opts ...Option) Result[T] {
 	cfg := applyOptions(opts)
 	validate(property, cfg)
+	if property.Shrinker == nil {
+		property.Shrinker = shrinkerFor(property.Generator)
+	}
 	dispatcher := newHookDispatcher(property.Hooks)
 	startedAt := time.Now()
 

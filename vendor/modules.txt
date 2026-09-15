@@ -37,7 +37,7 @@ github.com/Quad4-Software/bzip2/pkg/bzip2
 ## explicit; go 1.27.1
 github.com/Quad4-Software/msgpack/v5/pkg/msgpack
 github.com/Quad4-Software/msgpack/v5/pkg/msgpack/msgpcode
-# github.com/Quad4-Software/pbt v1.0.1
+# github.com/Quad4-Software/pbt v1.0.2
 ## explicit; go 1.27.1
 github.com/Quad4-Software/pbt/pkg/pbt
 # github.com/Quad4-Software/tagparser/v2 v2.2.1

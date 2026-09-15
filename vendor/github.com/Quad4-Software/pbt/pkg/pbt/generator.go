@@ -19,8 +19,9 @@ type Generator[T any] interface {
 
 // GeneratorFunc adapts plain functions into a Generator.
 type GeneratorFunc[T any] struct {
-	name string
-	fn   func(r *rand.Rand, size int) T
+	name     string
+	fn       func(r *rand.Rand, size int) T
+	shrinker Shrinker[T]
 }
 
 // NewGenerator builds a named generator from a function.
@@ -28,6 +29,17 @@ func NewGenerator[T any](name string, fn func(r *rand.Rand, size int) T) Generat
 	return GeneratorFunc[T]{
 		name: name,
 		fn:   fn,
+	}
+}
+
+// NewShrinkableGenerator builds a named generator that carries a shrinker, so
+// properties using it minimize counterexamples without an explicit
+// WithShrinker.
+func NewShrinkableGenerator[T any](name string, fn func(r *rand.Rand, size int) T, shrinker Shrinker[T]) Generator[T] {
+	return GeneratorFunc[T]{
+		name:     name,
+		fn:       fn,
+		shrinker: shrinker,
 	}
 }
 
@@ -39,6 +51,27 @@ func (g GeneratorFunc[T]) Generate(r *rand.Rand, size int) T {
 // Name returns the generator name for reporting.
 func (g GeneratorFunc[T]) Name() string {
 	return g.name
+}
+
+// Shrinker returns the attached shrinker, or nil when the generator was built
+// with NewGenerator.
+func (g GeneratorFunc[T]) Shrinker() Shrinker[T] {
+	return g.shrinker
+}
+
+// ShrinkableGenerator is a Generator that knows how to shrink its own values.
+// Properties checked without an explicit WithShrinker use it automatically.
+type ShrinkableGenerator[T any] interface {
+	Generator[T]
+	Shrinker() Shrinker[T]
+}
+
+// shrinkerFor extracts the attached shrinker from a generator, if any.
+func shrinkerFor[T any](generator Generator[T]) Shrinker[T] {
+	if sg, ok := generator.(ShrinkableGenerator[T]); ok {
+		return sg.Shrinker()
+	}
+	return nil
 }
 
 // Int generates values across the full int range.
@@ -54,7 +87,11 @@ func IntRange(low int, high int) Generator[int] {
 		low, high = high, low
 	}
 
-	return NewGenerator("IntRange", func(r *rand.Rand, _ int) int {
+	shrinker := Shrinker[int](IntShrinker())
+	if low != 0 {
+		shrinker = IntShrinkerToward(low)
+	}
+	return NewShrinkableGenerator("IntRange", func(r *rand.Rand, _ int) int {
 		// #nosec G115 -- unsigned width arithmetic intentionally handles full int span.
 		width := uint(high) - uint(low) + 1
 		if width == 0 {
@@ -63,7 +100,7 @@ func IntRange(low int, high int) Generator[int] {
 		}
 		// #nosec G115 -- modulo mapping intentionally uses unsigned arithmetic.
 		return int(uint(low) + uint(r.Uint64()%uint64(width)))
-	})
+	}, shrinker)
 }
 
 // Bool generates random boolean values.
@@ -92,7 +129,7 @@ func StringASCII(low int, high int) Generator[string] {
 		}
 	}
 
-	return NewGenerator("StringASCII", func(r *rand.Rand, size int) string {
+	return NewShrinkableGenerator("StringASCII", func(r *rand.Rand, size int) string {
 		localHigh := high
 		if size > 0 && size < localHigh {
 			localHigh = size
@@ -112,7 +149,7 @@ func StringASCII(low int, high int) Generator[string] {
 			b.WriteByte(asciiAlphabet[r.Intn(len(asciiAlphabet))])
 		}
 		return b.String()
-	})
+	}, StringShrinker())
 }
 
 // SliceOf generates slices with values from the provided element generator.
@@ -127,7 +164,11 @@ func SliceOf[T any](elem Generator[T], low int, high int) Generator[[]T] {
 		}
 	}
 
-	return NewGenerator("SliceOf", func(r *rand.Rand, size int) []T {
+	shrinker := Shrinker[[]T](SliceShrinker[T]())
+	if es := shrinkerFor(elem); es != nil {
+		shrinker = SliceShrinkerOf(es)
+	}
+	return NewShrinkableGenerator("SliceOf", func(r *rand.Rand, size int) []T {
 		localHigh := high
 		if size > 0 && size < localHigh {
 			localHigh = size
@@ -146,7 +187,7 @@ func SliceOf[T any](elem Generator[T], low int, high int) Generator[[]T] {
 			out = append(out, elem.Generate(r, size))
 		}
 		return out
-	})
+	}, shrinker)
 }
 
 // Map transforms values produced by a generator.
@@ -158,10 +199,10 @@ func Map[A any, B any](name string, source Generator[A], mapper func(A) B) Gener
 
 // Int64 generates values across the full int64 range.
 func Int64() Generator[int64] {
-	return NewGenerator("Int64", func(r *rand.Rand, _ int) int64 {
+	return NewShrinkableGenerator("Int64", func(r *rand.Rand, _ int) int64 {
 		// #nosec G115 -- full-range bit pattern cast is the intended distribution.
 		return int64(r.Uint64())
-	})
+	}, Int64Shrinker())
 }
 
 // Int64Range generates int64 values in the inclusive range [low, high].
@@ -170,7 +211,11 @@ func Int64Range(low int64, high int64) Generator[int64] {
 		low, high = high, low
 	}
 
-	return NewGenerator("Int64Range", func(r *rand.Rand, _ int) int64 {
+	shrinker := Shrinker[int64](Int64Shrinker())
+	if low != 0 {
+		shrinker = Int64ShrinkerToward(low)
+	}
+	return NewShrinkableGenerator("Int64Range", func(r *rand.Rand, _ int) int64 {
 		// #nosec G115 -- unsigned width arithmetic intentionally handles full int64 span.
 		width := uint64(high) - uint64(low) + 1
 		if width == 0 {
@@ -179,14 +224,14 @@ func Int64Range(low int64, high int64) Generator[int64] {
 		}
 		// #nosec G115 -- modulo mapping intentionally uses unsigned arithmetic.
 		return int64(uint64(low) + r.Uint64()%width)
-	})
+	}, shrinker)
 }
 
 // Uint64 generates values across the full uint64 range.
 func Uint64() Generator[uint64] {
-	return NewGenerator("Uint64", func(r *rand.Rand, _ int) uint64 {
+	return NewShrinkableGenerator("Uint64", func(r *rand.Rand, _ int) uint64 {
 		return r.Uint64()
-	})
+	}, Uint64Shrinker())
 }
 
 // Bytes generates byte slices with length in [low, high].
@@ -201,7 +246,7 @@ func Bytes(low int, high int) Generator[[]byte] {
 		}
 	}
 
-	return NewGenerator("Bytes", func(r *rand.Rand, size int) []byte {
+	return NewShrinkableGenerator("Bytes", func(r *rand.Rand, size int) []byte {
 		localHigh := high
 		if size > 0 && size < localHigh {
 			localHigh = size
@@ -219,7 +264,7 @@ func Bytes(low int, high int) Generator[[]byte] {
 		// rand.Rand.Read fills the slice deterministically and never fails.
 		_, _ = r.Read(out)
 		return out
-	})
+	}, BytesShrinker())
 }
 
 // String generates UTF-8 strings of printable runes with length in [low, high]
@@ -236,7 +281,7 @@ func String(low int, high int) Generator[string] {
 		}
 	}
 
-	return NewGenerator("String", func(r *rand.Rand, size int) string {
+	return NewShrinkableGenerator("String", func(r *rand.Rand, size int) string {
 		localHigh := high
 		if size > 0 && size < localHigh {
 			localHigh = size
@@ -255,7 +300,7 @@ func String(low int, high int) Generator[string] {
 			b.WriteRune(randomPrintableRune(r))
 		}
 		return b.String()
-	})
+	}, StringShrinker())
 }
 
 // randomPrintableRune draws a printable non-surrogate code point. Rejection is
@@ -287,7 +332,7 @@ func MapOf[K comparable, V any](key Generator[K], value Generator[V], low int, h
 		}
 	}
 
-	return NewGenerator("MapOf", func(r *rand.Rand, size int) map[K]V {
+	return NewShrinkableGenerator("MapOf", func(r *rand.Rand, size int) map[K]V {
 		localHigh := high
 		if size > 0 && size < localHigh {
 			localHigh = size
@@ -306,7 +351,7 @@ func MapOf[K comparable, V any](key Generator[K], value Generator[V], low int, h
 			out[key.Generate(r, size)] = value.Generate(r, size)
 		}
 		return out
-	})
+	}, MapShrinker[K, V]())
 }
 
 // DurationRange generates time.Duration values in the inclusive range
@@ -316,7 +361,7 @@ func DurationRange(low time.Duration, high time.Duration) Generator[time.Duratio
 		low, high = high, low
 	}
 
-	return NewGenerator("DurationRange", func(r *rand.Rand, _ int) time.Duration {
+	return NewShrinkableGenerator("DurationRange", func(r *rand.Rand, _ int) time.Duration {
 		// #nosec G115 -- unsigned width arithmetic intentionally handles full duration span.
 		width := uint64(high) - uint64(low) + 1
 		if width == 0 {
@@ -325,7 +370,7 @@ func DurationRange(low time.Duration, high time.Duration) Generator[time.Duratio
 		}
 		// #nosec G115 -- modulo mapping intentionally uses unsigned arithmetic.
 		return time.Duration(uint64(low) + r.Uint64()%width)
-	})
+	}, DurationShrinkerToward(low))
 }
 
 // PtrOf generates pointers where nilPercent percent of values are nil. A
@@ -338,11 +383,11 @@ func PtrOf[T any](elem Generator[T], nilPercent int) Generator[*T] {
 		nilPercent = 100
 	}
 
-	return NewGenerator("PtrOf", func(r *rand.Rand, size int) *T {
+	return NewShrinkableGenerator("PtrOf", func(r *rand.Rand, size int) *T {
 		if r.Intn(100) < nilPercent {
 			return nil
 		}
 		value := elem.Generate(r, size)
 		return &value
-	})
+	}, PtrShrinker(shrinkerFor(elem)))
 }
