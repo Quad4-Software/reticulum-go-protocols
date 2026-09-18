@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: 0BSD
+# SPDX-License-Identifier: LicenseRef-Reticulum
 
 """Raw ctypes layer over include/rrc.h."""
 

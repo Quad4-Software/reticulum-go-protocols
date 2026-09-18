@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Reticulum
 """Dump LXST 0.5.1 constants and umsgpack wire bytes for Go oracles."""
 
 import hashlib

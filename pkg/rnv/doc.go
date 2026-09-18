@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 // Package rnv implements Reticulum Native Video protocol version 1.
 //

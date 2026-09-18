@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package rrc
 
 // MessageHandler is called for inbound RRC envelopes on a session.

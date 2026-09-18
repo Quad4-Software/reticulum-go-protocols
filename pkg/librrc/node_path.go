@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package librrc
 
 func NodeHasPath(nodeHandle uint64, destHash []byte) (bool, int) {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 // Package rrc implements Reticulum Relay Chat (RRC) protocol version 1.
 //

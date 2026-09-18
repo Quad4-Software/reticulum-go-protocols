@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Reticulum
 """Decode a Go-produced LXST codec2 wire frame for interop tests."""
 
 import json

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Reticulum
 """Headless LXST telephony peer for Go interop tests."""
 
 import argparse

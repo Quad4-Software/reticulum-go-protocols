@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 use std::ffi::CStr;
 use std::os::raw::c_char;

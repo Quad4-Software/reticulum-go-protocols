@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Reticulum
 """Official LXST Telephone peer for Go interop tests.
 
 Audio devices are stubbed so signalling and packetizer paths run headless.

@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package main
 
 import (

@@ -100,4 +100,4 @@ Package APIs, examples, interop notes, and the full command matrix: [docs/en/bui
 
 ## License
 
-[0BSD](LICENSE). Copyright 2026 Quad4.io.
+[Reticulum License](LICENSE). Copyright 2026 Quad4.io. Portions derived from the Reticulum Network Stack reference implementation are Copyright (c) 2016-2026 Mark Qvist. See [LEGAL.md](LEGAL.md) for the license lineage.

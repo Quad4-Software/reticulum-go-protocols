@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 //go:build !((linux || darwin) && (amd64 || arm64)) || lxstamp_nogpu
 

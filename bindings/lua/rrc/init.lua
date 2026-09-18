@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: 0BSD
+-- SPDX-License-Identifier: LicenseRef-Reticulum
 
 local ffi_mod = require("rrc.ffi")
 local buffers = require("rrc.buffers")

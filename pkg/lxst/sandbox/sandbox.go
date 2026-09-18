@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 // Package sandbox applies Linux Landlock and seccomp-bpf to RGESP CLIs.
 // Restrictions cannot be disabled by environment variables, flags, or config keys.

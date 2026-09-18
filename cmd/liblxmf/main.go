@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package main
 
 import _ "github.com/Quad4-Software/reticulum-go-protocols/pkg/liblxmf/capi"

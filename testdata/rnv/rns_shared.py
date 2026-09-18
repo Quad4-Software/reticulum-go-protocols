@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: 0BSD
+# SPDX-License-Identifier: LicenseRef-Reticulum
 """Isolated Python Reticulum shared-instance hub for RNV live tests."""
 import argparse
 import json

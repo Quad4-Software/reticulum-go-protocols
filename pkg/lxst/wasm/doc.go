@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 // Package wasm compiles RGESP against reticulum-go WASM and stub codecs.
 // CGO Opus and miniaudio are not available. Audio uses NullDevice unless a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package golxmd
 
 // Version is the golxmd release string. Override at link time with

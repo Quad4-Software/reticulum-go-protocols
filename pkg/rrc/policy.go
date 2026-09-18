@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package rrc
 
 import "github.com/Quad4-Software/Reticulum-Go/pkg/link"

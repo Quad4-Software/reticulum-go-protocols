@@ -1,5 +1,5 @@
 #!/usr/bin/env luajit
--- SPDX-License-Identifier: 0BSD
+-- SPDX-License-Identifier: LicenseRef-Reticulum
 
 package.path = "../../?.lua;" .. package.path
 

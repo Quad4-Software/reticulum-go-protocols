@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 use rrc::{version, Envelope, Identity, Node, API_VERSION, HASH_LEN, RRC_TYPE_MSG};
 

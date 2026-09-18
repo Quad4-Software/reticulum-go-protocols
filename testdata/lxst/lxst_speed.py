@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Reticulum
 """CPU timing for LXST 0.5.1 pack, unpack, dest hash, and Opus."""
 
 import hashlib

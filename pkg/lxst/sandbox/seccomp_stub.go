@@ -1,6 +1,6 @@
 //go:build !linux
 
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package sandbox
 
 func restrictSeccomp() error {

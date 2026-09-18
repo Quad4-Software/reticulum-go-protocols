@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package rrc
 
 // AppName is the Reticulum destination application name for RRC hubs.

@@ -1,6 +1,6 @@
 //go:build ignore
 
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 // LXST wire codec example: pack signalling and audio frames.
 package main

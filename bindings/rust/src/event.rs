@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: 0BSD
+// SPDX-License-Identifier: LicenseRef-Reticulum
 
 use crate::error::{map_code, Error, Result};
 use crate::ffi::{self, HASH_LEN};

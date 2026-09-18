@@ -1,6 +1,6 @@
 //go:build !musl
 
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 package sandbox
 
 func muslTagged() bool { return false }
