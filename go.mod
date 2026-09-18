@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/Quad4-Software/Reticulum-Go v1.2.1-0.20260915052851-442bcf6b2f77
-	github.com/Quad4-Software/msgpack/v5 v5.9.1
+	github.com/Quad4-Software/msgpack/v5 v5.9.2
 	github.com/Quad4-Software/pbt v1.0.2
 	github.com/ebitengine/purego v0.11.0
 	github.com/fxamacker/cbor/v2 v2.9.2
