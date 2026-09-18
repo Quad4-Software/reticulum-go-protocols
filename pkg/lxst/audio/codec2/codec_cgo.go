@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build cgo && lxst_native
 
 // SPDX-License-Identifier: LicenseRef-Reticulum
 package codec2

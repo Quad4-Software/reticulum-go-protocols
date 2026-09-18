@@ -1,9 +1,13 @@
-//go:build !cgo
+//go:build !cgo || !lxst_native
 
 // SPDX-License-Identifier: LicenseRef-Reticulum
 package opus
 
 import "fmt"
+
+// stubStoredSamples bounds the PCM samples a stub frame carries so stub
+// packets stay well under link MTU like real codec output does.
+const stubStoredSamples = 24
 
 // Native reports whether this build talks to libopus.
 func Native() bool { return false }
@@ -45,14 +49,21 @@ func (s *stubEncoder) Encode(pcm []int16) ([]byte, error) {
 		return nil, fmt.Errorf("short pcm")
 	}
 	n := s.frame
-	out := make([]byte, 4+n*2)
+	k := n
+	if k > stubStoredSamples {
+		k = stubStoredSamples
+	}
+	out := make([]byte, 6+k*2)
 	out[0] = 'S'
 	out[1] = 'T'
 	out[2] = byte(n >> 8)
 	out[3] = byte(n)
-	for i := 0; i < n; i++ {
-		out[4+i*2] = byte(pcm[i] >> 8)
-		out[4+i*2+1] = byte(pcm[i])
+	out[4] = byte(k >> 8)
+	out[5] = byte(k)
+	for i := 0; i < k; i++ {
+		v := pcm[i*n/k]
+		out[6+i*2] = byte(v >> 8)
+		out[6+i*2+1] = byte(v)
 	}
 	return out, nil
 }
@@ -107,16 +118,19 @@ func (s *stubDecoder) Decode(packet []byte) ([]int16, error) {
 	if s.closed {
 		return nil, ErrCodecClosed
 	}
-	if len(packet) < 4 || packet[0] != 'S' || packet[1] != 'T' {
+	if len(packet) < 6 || packet[0] != 'S' || packet[1] != 'T' {
 		return nil, fmt.Errorf("invalid stub packet")
 	}
-	n := int(packet[2])<<8 | int(packet[3])
-	if len(packet) < 4+n*2 {
+	k := int(packet[4])<<8 | int(packet[5])
+	if k <= 0 || len(packet) < 6+k*2 {
 		return nil, fmt.Errorf("truncated stub packet")
 	}
-	out := make([]int16, n)
+	// Real opus decodes to the decoder's configured frame length at the
+	// playback rate; mirror that contract so callers see a fixed frame size.
+	out := make([]int16, s.frame)
 	for i := range out {
-		out[i] = int16(packet[4+i*2])<<8 | int16(packet[4+i*2+1])
+		v := int16(packet[6+(i*k/s.frame)*2])<<8 | int16(packet[6+(i*k/s.frame)*2+1])
+		out[i] = v
 	}
 	return out, nil
 }

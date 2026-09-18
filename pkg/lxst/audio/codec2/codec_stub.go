@@ -1,4 +1,4 @@
-//go:build !cgo
+//go:build !cgo || !lxst_native
 
 // SPDX-License-Identifier: LicenseRef-Reticulum
 package codec2
@@ -9,6 +9,10 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
+
+// stubStoredSamples bounds the PCM samples a stub frame carries so stub
+// packets stay well under link MTU like real codec2 output does.
+const stubStoredSamples = 24
 
 // Native reports whether this build talks to libcodec2.
 func Native() bool { return false }
@@ -49,15 +53,22 @@ func (s *stubCodec) Encode(pcm []int16) ([]byte, error) {
 		return nil, fmt.Errorf("empty pcm")
 	}
 	n := len(pcm)
-	out := make([]byte, 5+n*2)
+	k := n
+	if k > stubStoredSamples {
+		k = stubStoredSamples
+	}
+	out := make([]byte, 7+k*2)
 	out[0] = s.header
 	out[1] = 'S'
 	out[2] = 'T'
 	out[3] = byte(n >> 8)
 	out[4] = byte(n)
-	for i := 0; i < n; i++ {
-		out[5+i*2] = byte(pcm[i] >> 8)
-		out[5+i*2+1] = byte(pcm[i])
+	out[5] = byte(k >> 8)
+	out[6] = byte(k)
+	for i := 0; i < k; i++ {
+		v := pcm[i*n/k]
+		out[7+i*2] = byte(v >> 8)
+		out[7+i*2+1] = byte(v)
 	}
 	return out, nil
 }
@@ -66,16 +77,17 @@ func (s *stubCodec) Decode(packet []byte) ([]int16, error) {
 	if s.closed {
 		return nil, ErrCodecClosed
 	}
-	if len(packet) < 5 || packet[1] != 'S' || packet[2] != 'T' {
+	if len(packet) < 7 || packet[1] != 'S' || packet[2] != 'T' {
 		return nil, fmt.Errorf("invalid stub codec2 packet")
 	}
 	n := int(packet[3])<<8 | int(packet[4])
-	if len(packet) < 5+n*2 {
+	k := int(packet[5])<<8 | int(packet[6])
+	if n <= 0 || k <= 0 || len(packet) < 7+k*2 {
 		return nil, fmt.Errorf("truncated stub codec2 packet")
 	}
 	pcm := make([]int16, n)
 	for i := range pcm {
-		pcm[i] = int16(packet[5+i*2])<<8 | int16(packet[5+i*2+1])
+		pcm[i] = int16(packet[7+(i*k/n)*2])<<8 | int16(packet[7+(i*k/n)*2+1])
 	}
 	return opus.Upsample(pcm, SampleRate, proto.PlaybackSampleRate), nil
 }

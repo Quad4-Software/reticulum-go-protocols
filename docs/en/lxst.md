@@ -27,14 +27,14 @@ if err := caller.Dial(ctx, remoteIdentity); err != nil {
 | [cmd/rnphone](../../cmd/rnphone) | Interactive phone (phonebook, ringtone, announce, history) |
 | [cmd/rgesp-dial](../../cmd/rgesp-dial) | Scriptable dialer for tests and automation |
 
-Build with CGO for real audio:
+Build with the lxst_native tag for real audio (requires CGO plus libopus and libcodec2, either system packages or third_party builds from scripts/lxst/vendor-sync.sh):
 
 ```bash
 task rnphone
 ./bin/rnphone-$(go env GOOS)-$(go env GOARCH)
 ```
 
-Without CGO, pkg/lxst still compiles: codecs use stubs so unit tests and the wire codec run in CI without native libraries.
+Without lxst_native, pkg/lxst compiles with codec stubs so unit tests and the wire codec run without native libraries. Python lxst interop and the phone binaries always build with the tag.
 
 ```bash
 make liblxst

@@ -23,5 +23,5 @@ if [ "$GOOS" = "windows" ]; then
 	suffix=".exe"
 fi
 
-go build -o "$OUTDIR/rnphone-${GOOS}-${GOARCH}${suffix}" ./cmd/rnphone
-go build -o "$OUTDIR/rgesp-dial-${GOOS}-${GOARCH}${suffix}" ./cmd/rgesp-dial
+go build -tags lxst_native -o "$OUTDIR/rnphone-${GOOS}-${GOARCH}${suffix}" ./cmd/rnphone
+go build -tags lxst_native -o "$OUTDIR/rgesp-dial-${GOOS}-${GOARCH}${suffix}" ./cmd/rgesp-dial

@@ -47,7 +47,7 @@ if [ "${GOARCH:-}" = "arm" ] && command -v qemu-arm-static >/dev/null 2>&1; then
 fi
 
 # shellcheck disable=SC2086
-go test -count=1 -short $test_exec \
+go test -tags lxst_native -count=1 -short $test_exec \
 	./pkg/audio/... \
 	./pkg/sandbox/ \
 	./pkg/proto/ \
@@ -60,8 +60,8 @@ go test -count=1 -short $test_exec \
 	./cmd/rnphone/
 
 mkdir -p bin
-go build -o bin/rgesp-dial ./cmd/rgesp-dial
-go build -o bin/rnphone ./cmd/rnphone
+go build -tags lxst_native -o bin/rgesp-dial ./cmd/rgesp-dial
+go build -tags lxst_native -o bin/rnphone ./cmd/rnphone
 if [ -z "$test_exec" ]; then
 	./bin/rnphone -version
 else

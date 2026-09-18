@@ -17,7 +17,7 @@ if [ -z "${LXST_PYTHON:-}" ]; then
 	fi
 fi
 
-"$GOCMD" test -count=1 -timeout 25m -v \
+"$GOCMD" test -tags lxst_native -count=1 -timeout 25m -v \
 	./pkg/lxst/proto/... \
 	./pkg/lxst/phonebook/... \
 	./pkg/lxst/call/... \
