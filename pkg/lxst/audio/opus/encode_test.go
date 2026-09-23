@@ -9,7 +9,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/audio/opus"
 )
 
-func TestPropertyEncodeNeverEmptyOnPCM(t *testing.T) {
+func TestEncodeNeverEmptyOnPCM(t *testing.T) {
 	enc, err := opus.NewEncoder(opus.DefaultSampleRate, 1, 16000)
 	if err != nil {
 		t.Fatal(err)

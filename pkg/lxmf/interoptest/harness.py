@@ -324,7 +324,7 @@ def cmd_ticket_stamp(req: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "stamp": _hex(stamp)}
 
 
-def _write_rns_config(configdir: Path, listen_port: int, forward_port: int) -> None:
+def _write_rns_config(configdir: Path, listen_port: int, forward_port: int, loglevel: int = 0) -> None:
     configdir.mkdir(parents=True, exist_ok=True)
     (configdir / "storage").mkdir(exist_ok=True)
     (configdir / "storage" / "identities").mkdir(exist_ok=True)
@@ -335,7 +335,7 @@ def _write_rns_config(configdir: Path, listen_port: int, forward_port: int) -> N
   instance_name = lxmf-interop-{listen_port}
 
 [logging]
-  loglevel = 0
+  loglevel = {loglevel}
 
 [interfaces]
 
@@ -583,6 +583,145 @@ def cmd_live_send_propagation(req: dict[str, Any]) -> dict[str, Any]:
             pass
 
 
+def cmd_live_prop_node(req: dict[str, Any]) -> dict[str, Any]:
+    """Run a Python LXMRouter propagation node until stop_path appears.
+
+    Optionally injects one stored message addressed to the given recipient
+    delivery hash so a remote client can retrieve it through /get.
+    """
+    listen_port = int(req["listen_port"])
+    forward_port = int(req["forward_port"])
+    ready_path = req["ready_path"]
+    stop_path = req["stop_path"]
+    recipient_hash_hex = req.get("recipient_hash", "")
+    recipient_pubkey_hex = req.get("recipient_public_key", "")
+    title = req.get("title", "pn-stored")
+    text = req.get("text", "stored by python node")
+    duration_s = float(req.get("duration_s", 90))
+
+    configdir = Path(tempfile.mkdtemp(prefix="lxmf-pn-"))
+    try:
+        _write_rns_config(configdir, listen_port, forward_port, int(req.get("loglevel", 0)))
+        _reticulum = RNS.Reticulum(str(configdir))
+        RNS.loglevel = int(req.get("loglevel", 0))
+        storage = configdir / "storage"
+        storage.mkdir(parents=True, exist_ok=True)
+        router = LXMF_pkg.LXMRouter(identity=RNS.Identity(), storagepath=str(storage))
+        router.enable_propagation()
+
+        if recipient_hash_hex and recipient_pubkey_hex:
+            rid = RNS.Identity(create_keys=False)
+            rid.load_public_key(_unhex(recipient_pubkey_hex))
+            recipient = RNS.Destination(
+                rid,
+                RNS.Destination.OUT,
+                RNS.Destination.SINGLE,
+                LXMF.APP_NAME,
+                "delivery",
+            )
+            if recipient.hash != _unhex(recipient_hash_hex):
+                return {"ok": False, "error": "recipient hash mismatch with public key"}
+            src = router.register_delivery_identity(router.identity, display_name="pn-injector")
+            lxm = LXMessage(recipient, src, text, title)
+            lxm.pack()
+            encrypted = recipient.encrypt(lxm.packed[LXMessage.DESTINATION_LENGTH:])
+            lxmf_data = lxm.packed[:LXMessage.DESTINATION_LENGTH] + encrypted
+            ok = router.lxmf_propagation(
+                lxmf_data,
+                stamp_value=16,
+                stamp_data=b"\x00" * LXStamper.STAMP_SIZE,
+            )
+            if ok is False:
+                return {"ok": False, "error": "lxmf_propagation rejected injected message"}
+
+        Path(ready_path).write_text(
+            json.dumps({"propagation_hash": _hex(router.propagation_destination.hash)}),
+            encoding="utf-8",
+        )
+
+        initial_entries = len(router.propagation_entries)
+        purged = False
+        deadline = time.time() + duration_s
+        while time.time() < deadline and not Path(stop_path).exists():
+            router.announce_propagation_node()
+            if initial_entries > 0 and len(router.propagation_entries) == 0:
+                purged = True
+            time.sleep(0.3)
+
+        return {
+            "ok": True,
+            "propagation_hash": _hex(router.propagation_destination.hash),
+            "purged": purged,
+            "served": router.client_propagation_messages_served,
+            "entries": len(router.propagation_entries),
+        }
+    finally:
+        try:
+            shutil.rmtree(configdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def cmd_live_prop_fetch(req: dict[str, Any]) -> dict[str, Any]:
+    """Run a Python LXMF client that downloads messages from a propagation node."""
+    listen_port = int(req["listen_port"])
+    forward_port = int(req["forward_port"])
+    ready_path = req["ready_path"]
+    pn_hex = req["propagation_hash"]
+    timeout_s = float(req.get("timeout_s", 90))
+
+    configdir = Path(tempfile.mkdtemp(prefix="lxmf-fetch-"))
+    try:
+        _write_rns_config(configdir, listen_port, forward_port)
+        _reticulum = RNS.Reticulum(str(configdir))
+        storage = configdir / "storage"
+        storage.mkdir(parents=True, exist_ok=True)
+        router = LXMF_pkg.LXMRouter(identity=RNS.Identity(), storagepath=str(storage))
+
+        delivered: list[str] = []
+        router.register_delivery_callback(lambda msg: delivered.append(_as_text(msg.content)))
+        src = router.register_delivery_identity(router.identity, display_name="fetch-client")
+
+        Path(ready_path).write_text(
+            json.dumps(
+                {
+                    "delivery_hash": _hex(src.hash),
+                    "public_key": _hex(router.identity.get_public_key()),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        pn_hash = _unhex(pn_hex)
+        deadline = time.time() + timeout_s
+        while not RNS.Transport.has_path(pn_hash) and time.time() < deadline:
+            src.announce()
+            RNS.Transport.request_path(pn_hash)
+            time.sleep(0.3)
+        if not RNS.Transport.has_path(pn_hash):
+            return {"ok": False, "error": "no path to propagation node"}
+
+        router.set_outbound_propagation_node(pn_hash)
+        router.request_messages_from_propagation_node(router.identity)
+
+        deadline = time.time() + timeout_s
+        while router.propagation_transfer_state != LXMF_pkg.LXMRouter.PR_COMPLETE and time.time() < deadline:
+            time.sleep(0.2)
+
+        return {
+            "ok": True,
+            "state": router.propagation_transfer_state,
+            "received": len(delivered),
+            "texts": delivered,
+            "last_result": router.propagation_transfer_last_result,
+        }
+    finally:
+        try:
+            shutil.rmtree(configdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 HANDLERS = {
     "ping": cmd_ping,
     "pack": cmd_pack,
@@ -602,6 +741,8 @@ HANDLERS = {
     "live_recv": cmd_live_recv,
     "live_send_delivery": cmd_live_send_delivery,
     "live_send_propagation": cmd_live_send_propagation,
+    "live_prop_node": cmd_live_prop_node,
+    "live_prop_fetch": cmd_live_prop_fetch,
 }
 
 

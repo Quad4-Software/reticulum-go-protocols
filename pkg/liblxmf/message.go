@@ -38,6 +38,18 @@ func MessagePack(messageHandle, identityHandle uint64) ([]byte, int) {
 	return data, OK
 }
 
+func MessageEncryptedPayload(messageHandle uint64) ([]byte, int) {
+	rec, err := messageByHandle(messageHandle)
+	if err != nil {
+		return nil, setLastError(err)
+	}
+	data, err := rec.msg.EncryptedPayload()
+	if err != nil {
+		return nil, setLastError(err)
+	}
+	return data, OK
+}
+
 func MessageUnpack(data []byte) (uint64, int) {
 	msg, err := lxmf.Unpack(data, nil)
 	if err != nil {
@@ -76,6 +88,18 @@ func MessageGetContent(handle uint64) (string, int) {
 		return "", setLastError(err)
 	}
 	return rec.msg.ContentString(), OK
+}
+
+// MessageGetHash returns the 32-byte LXMF message id after Pack or Unpack.
+func MessageGetHash(handle uint64) ([]byte, int) {
+	rec, err := messageByHandle(handle)
+	if err != nil {
+		return nil, setLastError(err)
+	}
+	if len(rec.msg.Hash) == 0 {
+		return nil, setLastError(fmt.Errorf("%w: message has no hash yet", errInvalidArg))
+	}
+	return append([]byte(nil), rec.msg.Hash...), OK
 }
 
 func MessageDestroy(handle uint64) int {

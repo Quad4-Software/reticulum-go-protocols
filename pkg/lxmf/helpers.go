@@ -167,17 +167,43 @@ func EncodeAnnounceAppDataV5WithFeatures(displayName string, stampCost int64, fe
 	return marshalAnnounceAppData(payload)
 }
 
-// EncodePNAnnounceAppData builds the 7-element propagation node announce payload.
-func EncodePNAnnounceAppData(timebase int64, transferLimitKB, syncLimitKB int, stampTarget, stampFlex, peeringCost int, nodeName string) ([]byte, error) {
+// EncodeAnnounceAppDataWithIcon builds v0.5.0+ announce app data with optional icon appearance.
+// Layout is [name, cost?, [icon_name, fg_rgb3, bg_rgb3]?]. Empty iconName omits the icon element.
+func EncodeAnnounceAppDataWithIcon(displayName string, stampCost int64, iconName string, fgRGB, bgRGB []byte) ([]byte, error) {
+	var costElement any
+	if stampCost >= 0 {
+		costElement = stampCost
+	}
+	payload := []any{[]byte(displayName), costElement}
+	name := strings.TrimSpace(iconName)
+	if name != "" {
+		fg := normalizeAnnounceRGB3(fgRGB)
+		bg := normalizeAnnounceRGB3(bgRGB)
+		payload = append(payload, []any{name, fg, bg})
+	}
+	return marshalAnnounceAppData(payload)
+}
+
+func normalizeAnnounceRGB3(rgb []byte) []byte {
+	out := []byte{0, 0, 0}
+	if len(rgb) >= 3 {
+		copy(out, rgb[:3])
+	}
+	return out
+}
+
+// EncodePNAnnounceAppData builds the 7-element propagation node announce
+// payload. nodeState matches upstream propagation_node and not
+// from_static_only; the limits are announced as configured either way.
+func EncodePNAnnounceAppData(timebase int64, nodeState bool, transferLimitKB, syncLimitKB int, stampTarget, stampFlex, peeringCost int, nodeName string) ([]byte, error) {
 	md := map[byte]any{}
 	if nodeName != "" {
 		md[PNMetaName] = []byte(nodeName)
 	}
-	isPN := transferLimitKB > 0
 	payload := []any{
 		nil,
 		timebase,
-		isPN,
+		nodeState,
 		int64(transferLimitKB),
 		int64(syncLimitKB),
 		[]any{int64(stampTarget), int64(stampFlex), int64(peeringCost)},
@@ -371,7 +397,9 @@ func decodePNAnnounceArray(data []byte) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if n != 7 {
+	// Upstream accepts announces with at least 7 fields and ignores
+	// any trailing extension fields.
+	if n < 7 {
 		return nil, nil
 	}
 
@@ -433,7 +461,7 @@ func decodePNAnnounceArray(data []byte) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if na != 3 {
+	if na < 3 {
 		return nil, nil
 	}
 	ca0, err := dec.DecodeInt64()
@@ -457,6 +485,11 @@ func decodePNAnnounceArray(data []byte) ([]any, error) {
 		}
 		return nil, nil
 	}
+	for i := 3; i < na; i++ {
+		if err := dec.Skip(); err != nil {
+			return nil, err
+		}
+	}
 	out = append(out, []any{ca0, ca1, ca2})
 
 	v6, err := dec.DecodeInterface()
@@ -464,6 +497,12 @@ func decodePNAnnounceArray(data []byte) ([]any, error) {
 		return nil, err
 	}
 	out = append(out, v6)
+
+	for i := 7; i < n; i++ {
+		if err := dec.Skip(); err != nil {
+			return nil, err
+		}
+	}
 
 	return out, nil
 }

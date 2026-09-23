@@ -4,6 +4,8 @@ package lxmf
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -37,19 +39,110 @@ type Messenger struct {
 	deliveryLinkMu   sync.Mutex
 	deliveryLink     *link.Link
 	deliveryLinkPeer []byte
+
+	// backchannelLinks maps remote delivery destination hashes to links
+	// those remotes established inbound, matching upstream
+	// backchannel_links for outbound delivery reuse.
+	backchannelLinks map[string]*link.Link
+
+	// deliveredTIDs tracks transient ids of locally delivered messages,
+	// matching upstream locally_delivered_transient_ids.
+	deliveredMu   sync.Mutex
+	deliveredTIDs map[string]float64
+
+	// tickets mirrors upstream available_tickets and stampCosts mirrors
+	// outbound_stamp_costs learned from announces.
+	tickets    *ticketBook
+	stampCosts *stampCostBook
+
+	inboundStampCost *int
+	enforceStamps    bool
+
+	// retainSyncedOnNode mirrors upstream retain_synced_on_node. When
+	// set, already-held messages are not reported back to the node, so
+	// the node keeps them for other clients.
+	retainSyncedOnNode bool
 }
 
 // NewMessenger registers d's packet callback for inbound LXMF. Use NewDeliveryDestination for lxmf.delivery naming.
 func NewMessenger(t *transport.Transport, d *destination.Destination) *Messenger {
 	m := &Messenger{
-		transport: t,
-		dest:      d,
-		resolver:  RecallSource,
+		transport:        t,
+		dest:             d,
+		resolver:         RecallSource,
+		backchannelLinks: make(map[string]*link.Link),
+		deliveredTIDs:    make(map[string]float64),
+		tickets:          newTicketBook(""),
+		stampCosts:       newStampCostBook(""),
 	}
 	d.SetPacketCallback(m.onPacket)
 	d.SetLinkEstablishedCallback(m.onLinkEstablished)
 	t.RegisterDestination(d.GetHash(), m)
+	t.RegisterAnnounceHandler(&messengerAnnounceHandler{m: m})
 	return m
+}
+
+// messengerAnnounceHandler records announced stamp costs for outbound
+// delivery, matching upstream LXMFDeliveryAnnounceHandler.
+type messengerAnnounceHandler struct {
+	m *Messenger
+}
+
+func (h *messengerAnnounceHandler) AspectFilter() []string {
+	return []string{AppName + ".delivery"}
+}
+
+func (h *messengerAnnounceHandler) ReceivePathResponses() bool { return true }
+
+func (h *messengerAnnounceHandler) ReceivedAnnounce(destHash []byte, identAny any, appData []byte, hops uint8) error {
+	_ = identAny
+	_ = hops
+	if h.m == nil {
+		return nil
+	}
+	cost, ok, err := StampCostFromAppData(appData)
+	if err != nil {
+		return nil
+	}
+	h.m.stampCosts.update(destHash, cost, ok)
+	return nil
+}
+
+// SetStoragePath enables persistence of available tickets and outbound
+// stamp costs under path, matching upstream storage files.
+func (m *Messenger) SetStoragePath(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tickets = newTicketBook(path)
+	m.stampCosts = newStampCostBook(path)
+}
+
+// SetRetainSyncedOnNode mirrors upstream set_retain_node_lxms. When
+// enabled, FetchPropagated does not report already-held messages back to
+// the propagation node, so they stay stored there.
+func (m *Messenger) SetRetainSyncedOnNode(enabled bool) {
+	m.mu.Lock()
+	m.retainSyncedOnNode = enabled
+	m.mu.Unlock()
+}
+
+// SetInboundStampCost requires inbound messages to carry a stamp of the
+// given cost, matching upstream set_inbound_stamp_cost. Nil disables.
+func (m *Messenger) SetInboundStampCost(cost *int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cost != nil && (*cost < 1 || *cost >= 255) {
+		cost = nil
+	}
+	m.inboundStampCost = cost
+}
+
+// EnforceStamps drops inbound messages whose stamp does not meet the
+// configured cost, matching upstream enforce_stamps.
+func (m *Messenger) EnforceStamps(enabled bool) {
+	m.mu.Lock()
+	m.enforceStamps = enabled
+	m.mu.Unlock()
 }
 
 // onLinkEstablished wires inbound direct-delivery links: link packets carry
@@ -59,18 +152,82 @@ func (m *Messenger) onLinkEstablished(v any) {
 	if !ok || lnk == nil {
 		return
 	}
+	m.wireDeliveryLink(lnk)
+}
+
+// wireDeliveryLink installs the delivery callbacks on a link and registers
+// remote identifications as backchannels, matching upstream
+// delivery_link_established and delivery_remote_identified.
+func (m *Messenger) wireDeliveryLink(lnk *link.Link) {
 	_ = lnk.SetResourceStrategy(link.AcceptApp)
 	lnk.SetPacketCallback(func(data []byte, _ *packet.Packet) {
+		m.noteDelivered(data)
 		m.onPacket(m.directInner(data), nil)
 	})
 	lnk.SetResourceCallback(func(adv any) bool {
-		return resourceAdvertisedSize(adv) <= int64(LinkPacketMaxContent)*16
+		// Upstream accepts delivery resources up to the per-transfer
+		// limit, delivery_per_transfer_limit * 1000 bytes.
+		return resourceAdvertisedSize(adv) <= int64(DeliveryLimitKBDefault)*1000
 	})
 	lnk.SetResourceConcludedCallback(func(res any) {
 		if data := extractResourceData(res); len(data) > 0 {
+			m.noteDelivered(data)
 			m.onPacket(m.directInner(data), nil)
 		}
 	})
+	lnk.SetRemoteIdentifiedCallback(func(l *link.Link, id *identity.Identity) {
+		if id == nil {
+			return
+		}
+		dh, err := deliveryDestinationHash(id)
+		if err != nil {
+			return
+		}
+		m.deliveryLinkMu.Lock()
+		m.backchannelLinks[hex.EncodeToString(dh)] = l
+		m.deliveryLinkMu.Unlock()
+	})
+	lnk.SetLinkClosedCallback(func(closed *link.Link) {
+		m.deliveryLinkMu.Lock()
+		for key, l := range m.backchannelLinks {
+			if l == closed {
+				delete(m.backchannelLinks, key)
+			}
+		}
+		if m.deliveryLink == closed {
+			m.deliveryLink = nil
+			m.deliveryLinkPeer = nil
+		}
+		m.deliveryLinkMu.Unlock()
+	})
+}
+
+// noteDelivered records the transient id of a delivered wire payload,
+// which is the destination hash followed by the encrypted inner data.
+func (m *Messenger) noteDelivered(lxmfData []byte) {
+	if len(lxmfData) < DestinationLength {
+		return
+	}
+	sum := sha256.Sum256(lxmfData)
+	now := float64(time.Now().Unix())
+	m.deliveredMu.Lock()
+	m.deliveredTIDs[hex.EncodeToString(sum[:])] = now
+	// Transient ids are kept for MESSAGE_EXPIRY*6 upstream.
+	for k, ts := range m.deliveredTIDs {
+		if now-ts > messageExpirySeconds*6 {
+			delete(m.deliveredTIDs, k)
+		}
+	}
+	m.deliveredMu.Unlock()
+}
+
+// hasDelivered reports whether the transient id was already delivered,
+// matching upstream has_message.
+func (m *Messenger) hasDelivered(transientID []byte) bool {
+	m.deliveredMu.Lock()
+	defer m.deliveredMu.Unlock()
+	_, ok := m.deliveredTIDs[hex.EncodeToString(transientID)]
+	return ok
 }
 
 // directInner strips the destination hash prefix from link-delivered LXMF
@@ -87,8 +244,15 @@ func (m *Messenger) directInner(data []byte) []byte {
 }
 
 // NewDeliveryDestination returns the inbound lxmf.delivery destination for id.
+// ProveAll matches upstream delivery_packet, which proves every inbound link
+// packet so senders can mark direct deliveries delivered.
 func NewDeliveryDestination(id *identity.Identity, t *transport.Transport) (*destination.Destination, error) {
-	return destination.New(id, destination.In, destination.Single, AppName, t, "delivery")
+	dest, err := destination.New(id, destination.In, destination.Single, AppName, t, "delivery")
+	if err != nil {
+		return nil, err
+	}
+	dest.SetProofStrategy(destination.ProveAll)
+	return dest, nil
 }
 
 // NewDeliveryMessenger is NewDeliveryDestination plus NewMessenger.
@@ -139,8 +303,63 @@ func (m *Messenger) Compose(destinationHash []byte, title, content string, field
 	return NewMessage(destinationHash, m.DestinationHash(), []byte(title), []byte(content), fields)
 }
 
-// Send packs, signs, and sends one opportunistic encrypted packet. The peer must be in identity.Recall.
+// prepareOutbound applies upstream handle_outbound pre-pack steps: auto
+// stamp cost from announces, outbound ticket redemption, and ticket
+// inclusion for the destination.
+func (m *Messenger) prepareOutbound(msg *LXMessage) {
+	if msg.StampCost == nil {
+		if cost, ok := m.stampCosts.get(msg.DestinationHash); ok && cost > 0 {
+			c := int(cost)
+			msg.StampCost = &c
+		}
+	}
+	if len(msg.OutboundTicket) == 0 {
+		msg.OutboundTicket = m.tickets.outboundTicket(msg.DestinationHash)
+	}
+	if msg.IncludeTicket {
+		if ticket := m.tickets.generateTicket(msg.DestinationHash, TicketExpirySecs); ticket != nil {
+			msg.SetField(FieldTicket, ticket)
+		}
+	}
+}
+
+// stampOutbound applies the upstream get_stamp order: an outbound ticket
+// short-circuits PoW, an existing stamp is reused, and a required stamp
+// cost triggers PoW generation. Returns true when a stamp was set.
+func (m *Messenger) stampOutbound(ctx context.Context, msg *LXMessage) (bool, error) {
+	if len(msg.OutboundTicket) == TicketLength {
+		msg.Stamp = truncatedHash(msg.OutboundTicket, msg.Hash)
+		msg.StampValue = StampValueTicket
+		msg.StampValid = true
+		return true, nil
+	}
+	if len(msg.Stamp) > 0 || msg.StampCost == nil || *msg.StampCost <= 0 {
+		return false, nil
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 15*time.Minute)
+		defer cancel()
+	}
+	Info("generating lxmf delivery stamp", "cost", *msg.StampCost)
+	stamp, value, err := GenerateStamp(ctx, msg.Hash, *msg.StampCost, WorkblockExpandRounds)
+	if err != nil {
+		return false, fmt.Errorf("stamp generation: %w", err)
+	}
+	Verbose("lxmf delivery stamp ready", "value", value)
+	msg.Stamp = stamp
+	msg.StampValue = value
+	msg.StampValid = true
+	return true, nil
+}
+
+// Send packs, signs, stamps when required, and sends one opportunistic
+// encrypted packet. The peer must be in identity.Recall.
 func (m *Messenger) Send(msg *LXMessage) error {
+	return m.send(context.Background(), msg)
+}
+
+func (m *Messenger) send(ctx context.Context, msg *LXMessage) error {
 	if msg == nil {
 		return errors.New("lxmf: nil message")
 	}
@@ -166,8 +385,19 @@ func (m *Messenger) Send(msg *LXMessage) error {
 		return errors.New("lxmf: local destination has no identity")
 	}
 
+	m.prepareOutbound(msg)
+
 	if _, err := msg.Pack(signer); err != nil {
 		return err
+	}
+	stamped, err := m.stampOutbound(ctx, msg)
+	if err != nil {
+		return err
+	}
+	if stamped {
+		if _, err := msg.Pack(signer); err != nil {
+			return err
+		}
 	}
 
 	innerPayload, err := msg.EncryptedPayload()
@@ -228,36 +458,37 @@ func (m *Messenger) SendStampedContext(ctx context.Context, msg *LXMessage, stam
 	if msg == nil {
 		return errors.New("lxmf: nil message")
 	}
-	if stampCost <= 0 {
-		return m.Send(msg)
+	if stampCost > 0 {
+		msg.StampCost = &stampCost
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return m.send(ctx, msg)
+}
+
+// SendPropagated uploads a packed message to propNodeHash via an RNS link.
+func (m *Messenger) SendPropagated(msg *LXMessage, propNodeHash []byte, pnStampCost int) error {
+	if msg == nil {
+		return errors.New("lxmf: nil message")
 	}
 	signer := m.dest.GetIdentity()
 	if signer == nil {
 		return errors.New("lxmf: local destination has no identity")
 	}
+	m.prepareOutbound(msg)
 	if _, err := msg.Pack(signer); err != nil {
-		return fmt.Errorf("pre-pack: %w", err)
+		return err
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 15*time.Minute)
-		defer cancel()
-	}
-	stamp, value, err := GenerateStamp(ctx, msg.Hash, stampCost, WorkblockExpandRounds)
+	stamped, err := m.stampOutbound(context.Background(), msg)
 	if err != nil {
-		return fmt.Errorf("stamp generation: %w", err)
+		return err
 	}
-	msg.Stamp = stamp
-	msg.StampValue = value
-	msg.StampValid = true
-	return m.Send(msg)
-}
-
-// SendPropagated uploads a packed message to propNodeHash via an RNS link.
-func (m *Messenger) SendPropagated(msg *LXMessage, propNodeHash []byte, pnStampCost int) error {
+	if stamped {
+		if _, err := msg.Pack(signer); err != nil {
+			return fmt.Errorf("re-pack with stamp: %w", err)
+		}
+	}
 	if err := m.packForPropagation(msg, pnStampCost); err != nil {
 		return err
 	}
@@ -279,29 +510,13 @@ func (m *Messenger) SendPropagated(msg *LXMessage, propNodeHash []byte, pnStampC
 	return nil
 }
 
-// SendStampedPropagated is SendPropagated after generating a delivery stamp.
+// SendStampedPropagated is SendPropagated with a required delivery stamp cost.
 func (m *Messenger) SendStampedPropagated(msg *LXMessage, propNodeHash []byte, stampCost, pnStampCost int) error {
 	if msg == nil {
 		return errors.New("lxmf: nil message")
 	}
-	signer := m.dest.GetIdentity()
-	if signer == nil {
-		return errors.New("lxmf: local destination has no identity")
-	}
-	if _, err := msg.Pack(signer); err != nil {
-		return fmt.Errorf("pre-pack: %w", err)
-	}
 	if stampCost > 0 {
-		stamp, value, err := generateStampWithLog(msg.Hash, stampCost)
-		if err != nil {
-			return fmt.Errorf("stamp generation: %w", err)
-		}
-		msg.Stamp = stamp
-		msg.StampValue = value
-		msg.StampValid = true
-		if _, err := msg.Pack(signer); err != nil {
-			return fmt.Errorf("re-pack with stamp: %w", err)
-		}
+		msg.StampCost = &stampCost
 	}
 	return m.SendPropagated(msg, propNodeHash, pnStampCost)
 }
@@ -326,6 +541,10 @@ func (m *Messenger) Receive(pkt *packet.Packet, iface common.NetworkInterface) b
 	if err := sendDeliveryProof(m.dest, pkt, iface); err != nil {
 		Warning("inbound lxmf proof failed", "error", err)
 	}
+
+	// The wire form is the destination hash followed by the ciphertext.
+	lxmfData := append(append([]byte(nil), m.DestinationHash()...), pkt.Data...)
+	m.noteDelivered(lxmfData)
 
 	m.onPacket(plaintext, iface)
 	return true
@@ -369,10 +588,6 @@ func (m *Messenger) onPacket(plaintext []byte, iface common.NetworkInterface) {
 		return
 	}
 
-	if handler == nil {
-		return
-	}
-
 	msg, err := UnpackFromBytes(m.DestinationHash(), plaintext, resolver)
 	if err != nil && msg == nil {
 		Warning("inbound lxmf unpack failed", "error", err, "plaintext_len", len(plaintext))
@@ -384,7 +599,43 @@ func (m *Messenger) onPacket(plaintext []byte, iface common.NetworkInterface) {
 			"signature_validated", msg.SignatureValidated, "unverified_reason", msg.UnverifiedReason)
 	}
 
-	handler(msg, iface)
+	// Upstream lxmf_delivery remembers inbound FIELD_TICKET entries and
+	// enforces a required stamp cost when one is configured.
+	rememberTicketField(m.tickets, msg)
+
+	m.mu.RLock()
+	stampCost := m.inboundStampCost
+	enforce := m.enforceStamps
+	m.mu.RUnlock()
+	if stampCost != nil && *stampCost > 0 {
+		ok, verr := msg.ValidateStamp(*stampCost, m.tickets.inboundTickets(msg.SourceHash))
+		if verr == nil {
+			msg.StampValid = ok
+		}
+		if !msg.StampValid && enforce {
+			Warning("dropping message with invalid stamp", "hash", hex.EncodeToString(msg.Hash))
+			return
+		}
+	}
+
+	// Upstream drops already delivered messages by inner hash and
+	// records it in locally_delivered_transient_ids on delivery.
+	if len(msg.Hash) > 0 {
+		hashKey := hex.EncodeToString(msg.Hash)
+		m.deliveredMu.Lock()
+		_, dup := m.deliveredTIDs[hashKey]
+		if !dup {
+			m.deliveredTIDs[hashKey] = float64(time.Now().Unix())
+		}
+		m.deliveredMu.Unlock()
+		if dup {
+			return
+		}
+	}
+
+	if handler != nil {
+		handler(msg, iface)
+	}
 }
 
 func (m *Messenger) receiveError(err error) {

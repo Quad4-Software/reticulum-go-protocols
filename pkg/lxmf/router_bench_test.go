@@ -44,7 +44,7 @@ func BenchmarkValidatePNStamps(b *testing.B) {
 
 func BenchmarkEncodePNAnnounceAppData(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, err := EncodePNAnnounceAppData(1700000000, 256, 10240, 16, 3, 18, "bench-node")
+		_, err := EncodePNAnnounceAppData(1700000000, true, 256, 10240, 16, 3, 18, "bench-node")
 		if err != nil {
 			b.Fatal(err)
 		}

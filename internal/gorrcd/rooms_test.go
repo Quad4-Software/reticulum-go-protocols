@@ -10,7 +10,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rrc"
 )
 
-func TestProperty_ParseFullIDRoundTrip(t *testing.T) {
+func TestParseFullID_RoundTrip(t *testing.T) {
 	f := func(b0, b1, b2, b3 byte) bool {
 		raw := make([]byte, rrc.IdentityLength)
 		raw[0], raw[1], raw[2], raw[3] = b0, b1, b2, b3
@@ -29,7 +29,7 @@ func TestProperty_ParseFullIDRoundTrip(t *testing.T) {
 	t.Log("GORRCD_PARSE_FULL_ID_PROVED")
 }
 
-func TestProperty_SplitCmdFirstToken(t *testing.T) {
+func TestSplitCmd_FirstToken(t *testing.T) {
 	f := func(cmd string) bool {
 		if len(cmd) > 64 {
 			cmd = cmd[:64]
@@ -53,7 +53,7 @@ func TestProperty_SplitCmdFirstToken(t *testing.T) {
 	t.Log("GORRCD_SPLIT_CMD_PROVED")
 }
 
-func TestProperty_KeyEqualLengthClosed(t *testing.T) {
+func TestKeyEqual_RequiresEqualLength(t *testing.T) {
 	f := func(a, b string) bool {
 		if len(a) > 64 {
 			a = a[:64]
@@ -73,7 +73,7 @@ func TestProperty_KeyEqualLengthClosed(t *testing.T) {
 	t.Log("GORRCD_KEY_EQUAL_PROVED")
 }
 
-func TestOracle_RrcdJoinErrorStrings(t *testing.T) {
+func TestRoomRegistry_AllowJoinErrorStrings(t *testing.T) {
 	reg := NewRoomRegistry("", 900)
 	founder := mustID(1)
 	other := mustID(2)
@@ -94,7 +94,7 @@ func TestOracle_RrcdJoinErrorStrings(t *testing.T) {
 	t.Log("GORRCD_RRCD_JOIN_ERRORS_PROVED")
 }
 
-func TestOracle_RrcdContentErrorStrings(t *testing.T) {
+func TestRoomRegistry_AllowContentErrorStrings(t *testing.T) {
 	reg := NewRoomRegistry("", 900)
 	founder := mustID(1)
 	other := mustID(2)
@@ -111,7 +111,7 @@ func TestOracle_RrcdContentErrorStrings(t *testing.T) {
 	t.Log("GORRCD_RRCD_CONTENT_ERRORS_PROVED")
 }
 
-func TestOracle_FounderRemainsOpAfterDelOp(t *testing.T) {
+func TestRoomRegistry_FounderRemainsOpAfterDelOp(t *testing.T) {
 	reg := NewRoomRegistry("", 900)
 	founder := mustID(9)
 	reg.Ensure("ops", founder, true)
@@ -125,7 +125,7 @@ func TestOracle_FounderRemainsOpAfterDelOp(t *testing.T) {
 	t.Log("GORRCD_FOUNDER_OP_PROVED")
 }
 
-func TestOracle_TrustedBypassInviteAndKey(t *testing.T) {
+func TestRoomRegistry_TrustedJoinBypassesInviteAndKey(t *testing.T) {
 	reg := NewRoomRegistry("", 900)
 	founder := mustID(1)
 	trusted := mustID(3)

@@ -7,7 +7,7 @@ import (
 	"testing/quick"
 )
 
-func TestProperty_EnvelopeRoundTrip(t *testing.T) {
+func TestEnvelope_MarshalRoundTrip(t *testing.T) {
 	f := func(typ uint8, roomLen uint8, bodyLen uint8, nickLen uint8, hasRoom, hasBody, hasNick bool) bool {
 		sender := bytes.Repeat([]byte{0xab}, IdentityLength)
 		env, err := NewEnvelope(uint64(typ%50)+1, sender)
@@ -67,7 +67,7 @@ func TestProperty_EnvelopeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestProperty_NormalizeRoomIdempotent(t *testing.T) {
+func TestNormalizeRoom_Idempotent(t *testing.T) {
 	f := func(s string) bool {
 		if len(s) > 256 {
 			s = s[:256]
@@ -80,7 +80,7 @@ func TestProperty_NormalizeRoomIdempotent(t *testing.T) {
 	}
 }
 
-func TestProperty_SanitizeNickIdempotent(t *testing.T) {
+func TestSanitizeNick_Idempotent(t *testing.T) {
 	f := func(s string) bool {
 		if len(s) > 128 {
 			s = s[:128]
@@ -93,7 +93,7 @@ func TestProperty_SanitizeNickIdempotent(t *testing.T) {
 	}
 }
 
-func TestProperty_HelloBodyRoundTrip(t *testing.T) {
+func TestHelloBody_MapRoundTrip(t *testing.T) {
 	f := func(name, ver string, hasCap bool) bool {
 		if len(name) > 64 {
 			name = name[:64]
@@ -135,7 +135,7 @@ func TestProperty_HelloBodyRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOracle_MarshalUnmarshalStable(t *testing.T) {
+func TestEnvelope_MarshalUnmarshalStable(t *testing.T) {
 	sender := bytes.Repeat([]byte{0x55}, IdentityLength)
 	cases := []struct {
 		typ  uint64
@@ -184,7 +184,7 @@ func TestOracle_MarshalUnmarshalStable(t *testing.T) {
 			t.Fatal(err)
 		}
 		if mid.Type != end.Type || mid.Room != end.Room || mid.Nick != end.Nick {
-			t.Fatalf("oracle drift for type %d", tc.typ)
+			t.Fatalf("repack drift for type %d", tc.typ)
 		}
 		s1, ok1 := BodyAsString(mid.Body)
 		s2, ok2 := BodyAsString(end.Body)
@@ -195,8 +195,8 @@ func TestOracle_MarshalUnmarshalStable(t *testing.T) {
 	}
 }
 
-func TestOracle_HubLimitsKeysMatchSpec(t *testing.T) {
-	// Differential oracle: Go HubLimits map keys must match documented rrcd layout.
+func TestHubLimits_ToMapKeysMatchSpec(t *testing.T) {
+	// Go HubLimits map keys must match documented rrcd layout.
 	l := HubLimits{
 		MaxNickBytes: 10, MaxRoomNameBytes: 20, MaxMsgBodyBytes: 30,
 		MaxRoomsPerSession: 4, RateLimitMsgsPerMinute: 5,
@@ -217,7 +217,7 @@ func TestOracle_HubLimitsKeysMatchSpec(t *testing.T) {
 	}
 }
 
-func TestOracle_CapabilityKeysMatchRrcd(t *testing.T) {
+func TestDefaultHubCapabilities_MatchRrcd(t *testing.T) {
 	caps := DefaultHubCapabilities(true)
 	if caps[CapAction] != true || caps[CapDirectNotice] != true || caps[CapResourceEnvelope] != true {
 		t.Fatalf("caps=%#v", caps)
@@ -228,7 +228,7 @@ func TestOracle_CapabilityKeysMatchRrcd(t *testing.T) {
 	}
 }
 
-func TestOracle_DestinationKeyIsEight(t *testing.T) {
+func TestConstants_WireKeyAssignments(t *testing.T) {
 	if KeyDestination != 8 || TypeResourceEnvelope != 50 {
 		t.Fatalf("key dest=%d type res=%d", KeyDestination, TypeResourceEnvelope)
 	}
@@ -238,7 +238,7 @@ func TestOracle_DestinationKeyIsEight(t *testing.T) {
 	t.Log("RRC_WIRE_ASSIGNMENTS_PROVED")
 }
 
-func TestOracle_ResourceEnvelopeKeysMatchRrcd(t *testing.T) {
+func TestResourceEnvelopeKeys_MatchRrcd(t *testing.T) {
 	if ResourceKeyID != 0 || ResourceKeyKind != 1 || ResourceKeySize != 2 || ResourceKeySHA256 != 3 || ResourceKeyEncoding != 4 {
 		t.Fatal("resource body keys")
 	}
@@ -256,7 +256,7 @@ func TestOracle_ResourceEnvelopeKeysMatchRrcd(t *testing.T) {
 	t.Log("RRC_RESOURCE_KEYS_PROVED")
 }
 
-func TestOracle_ForwardedEnvelopeNeverTrustsWireSender(t *testing.T) {
+func TestEnvelopeFrom_StampsAuthenticatedPeer(t *testing.T) {
 	sender := bytes.Repeat([]byte{0x99}, IdentityLength)
 	peer := bytes.Repeat([]byte{0xaa}, IdentityLength)
 	env := mustEnvelope(t, TypeMsg, sender)
@@ -280,7 +280,7 @@ func TestOracle_ForwardedEnvelopeNeverTrustsWireSender(t *testing.T) {
 	}
 }
 
-func TestOracle_ErrorTypeDoesNotForward(t *testing.T) {
+func TestHandlePeer_ErrorTypeNotForwarded(t *testing.T) {
 	h := &Hub{cfg: HubConfig{}}
 	h.cfg.applyDefaults()
 	p := &hubPeer{

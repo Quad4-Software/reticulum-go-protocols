@@ -108,7 +108,7 @@ func TestSecurity_RateLimitTokenBucket(t *testing.T) {
 	}
 }
 
-func TestOracle_RateLimitTokensNeverExceedCap(t *testing.T) {
+func TestTakeToken_NeverExceedsCap(t *testing.T) {
 	f := func(limit uint8, sleeps uint8) bool {
 		cap := float64((int(limit) % 120) + 1)
 		h := &Hub{cfg: HubConfig{Limits: HubLimits{RateLimitMsgsPerMinute: uint64(cap)}}}
@@ -128,7 +128,7 @@ func TestOracle_RateLimitTokensNeverExceedCap(t *testing.T) {
 	}
 }
 
-func TestOracle_SanitizeNickStripsControls(t *testing.T) {
+func TestSanitizeNick_StripsControls(t *testing.T) {
 	cases := []string{"\x00", "\n\r", "\talice", "bob\x7f"}
 	for _, in := range cases {
 		out := SanitizeNick(in)
@@ -138,7 +138,7 @@ func TestOracle_SanitizeNickStripsControls(t *testing.T) {
 	}
 }
 
-func TestOracle_ValidateResourceRejectsInvalidSHA256Type(t *testing.T) {
+func TestValidateResourceEnvelopeBody_RejectsSHA256Type(t *testing.T) {
 	body := map[uint64]any{
 		ResourceKeyID:     []byte{1, 2, 3, 4},
 		ResourceKeyKind:   ResourceKindBlob,

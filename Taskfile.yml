@@ -249,7 +249,7 @@ tasks:
       - "{{.GOCMD}} test -v -count=1 -timeout 15m -run='Test(GoGo|E2E|Acceptance|Sim)' ./pkg/lxst/call/... ./tests/lxst/..."
 
   test:lxst:interop:
-    desc: LXST Go-Python interop (requires pip lxst 0.5.1)
+    desc: LXST Go-Python interop (requires pip lxst 0.5.3)
     cmds:
       - sh scripts/ci/run-lxst-interop.sh
 
@@ -410,9 +410,14 @@ tasks:
       - sh scripts/ci/run-rust-bindings.sh
 
   test-java:
-    desc: Java librrc bindings tests and examples
+    desc: Java librrc and liblxmf bindings tests and examples
     cmds:
       - sh scripts/ci/run-java-bindings.sh
+
+  test-kotlin:
+    desc: Kotlin liblxmf bindings tests and examples
+    cmds:
+      - sh scripts/ci/run-kotlin-bindings.sh
 
   test-lua:
     desc: Lua librrc bindings tests and examples
@@ -421,7 +426,7 @@ tasks:
 
   test-bindings:
     desc: Run all language binding smoke tests
-    deps: [test-python, test-rust, test-java, test-lua, test-c, test-cpp]
+    deps: [test-python, test-rust, test-java, test-kotlin, test-lua, test-c, test-cpp]
 
   test-c:
     desc: C librrc bindings tests and examples

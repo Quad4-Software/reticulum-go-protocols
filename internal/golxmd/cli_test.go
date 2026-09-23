@@ -13,7 +13,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxmf"
 )
 
-func TestOracle_DecodeDestHashFormats(t *testing.T) {
+func TestDecodeDestHash_HexFormats(t *testing.T) {
 	raw := "a3a523f48208a950b026ccc0d8b702ac"
 	want, err := hex.DecodeString(raw)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestOracle_DecodeDestHashFormats(t *testing.T) {
 	}
 }
 
-func TestOracle_PrettyHexMatchesDecode(t *testing.T) {
+func TestPrettyHex_DottedForm(t *testing.T) {
 	raw := "bd83d875f9b033ed9e89d7f3c685de6e"
 	if prettyHex(raw) != raw {
 		t.Fatalf("prettyHex plain = %q", prettyHex(raw))
@@ -50,7 +50,7 @@ func TestOracle_PrettyHexMatchesDecode(t *testing.T) {
 	}
 }
 
-func TestOracle_CountDeliveryMessagesSkipsDotfiles(t *testing.T) {
+func TestCountDeliveryMessages_SkipsDotfiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "msg.lxm"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestOracle_CountDeliveryMessagesSkipsDotfiles(t *testing.T) {
 	}
 }
 
-func TestOracle_StatusIntervalOverride(t *testing.T) {
+func TestStatusInterval_EnvOverride(t *testing.T) {
 	t.Setenv("GOLXMD_STATUS_INTERVAL", "250ms")
 	if got := statusInterval(true); got != 250*time.Millisecond {
 		t.Fatalf("interval=%v", got)
@@ -77,7 +77,7 @@ func TestOracle_StatusIntervalOverride(t *testing.T) {
 	}
 }
 
-func TestProperty_NormalizeDestHashHexIdempotent(t *testing.T) {
+func TestNormalizeDestHashHex_Idempotent(t *testing.T) {
 	f := func(s string) bool {
 		if len(s) > 128 {
 			s = s[:128]
@@ -90,7 +90,7 @@ func TestProperty_NormalizeDestHashHexIdempotent(t *testing.T) {
 	}
 }
 
-func TestProperty_PrettyHexStableForValidHashes(t *testing.T) {
+func TestPrettyHex_ValidHashRoundTrip(t *testing.T) {
 	f := func(b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15 byte) bool {
 		raw := []byte{b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15}
 		plain := hex.EncodeToString(raw)
@@ -115,7 +115,7 @@ func TestProperty_PrettyHexStableForValidHashes(t *testing.T) {
 	}
 }
 
-func TestProperty_DecodeRejectsWrongLength(t *testing.T) {
+func TestDecodeDestHash_RejectsWrongLength(t *testing.T) {
 	f := func(s string) bool {
 		s = normalizeDestHashHex(s)
 		if len(s) == 2*lxmf.DestinationLength {

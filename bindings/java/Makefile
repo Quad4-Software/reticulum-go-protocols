@@ -3,6 +3,7 @@
 ROOT := ../..
 BIN := $(ROOT)/bin
 RRC_LIB := $(BIN)/librrc.so
+LXMF_LIB := $(BIN)/liblxmf.so
 ABS_BIN := $(abspath $(BIN))
 ABS_JAVA := $(abspath .)
 JAVAC ?= javac
@@ -15,15 +16,21 @@ CP := $(OUT):$(JNA_JAR)
 
 SRC := $(shell find src -type f -name '*.java' | sort)
 TEST_SRC := tests/SmokeTest.java
+LXMF_TEST_SRC := tests/LxmfSmokeTest.java
 
-.PHONY: all test check smoke examples clean librrc classes jna
+.PHONY: all test check smoke examples clean librrc liblxmf classes jna
 
 all: test
 
 librrc: $(RRC_LIB)
 
+liblxmf: $(LXMF_LIB)
+
 $(RRC_LIB):
 	cd $(ROOT) && task build-librrc
+
+$(LXMF_LIB):
+	cd $(ROOT) && task build-liblxmf
 
 jna: $(JNA_JAR)
 
@@ -36,25 +43,34 @@ classes: $(JNA_JAR)
 	mkdir -p $(OUT)
 	$(JAVAC) -encoding UTF-8 -d $(OUT) -cp $(JNA_JAR) $(SRC)
 
-test: $(RRC_LIB) classes
-	$(JAVAC) -encoding UTF-8 -d $(OUT) -cp $(CP) $(TEST_SRC)
+test: $(RRC_LIB) $(LXMF_LIB) classes
+	$(JAVAC) -encoding UTF-8 -d $(OUT) -cp $(CP) $(TEST_SRC) $(LXMF_TEST_SRC)
 	LIBRARY_PATH="$(ABS_BIN):$${LIBRARY_PATH:-}" \
 	LD_LIBRARY_PATH="$(ABS_BIN):$${LD_LIBRARY_PATH:-}" \
 	RRC_LIB_PATH="$(ABS_BIN)/librrc.so" \
 	RRC_ROOT="$(abspath $(ROOT))" \
 	$(JAVA) -cp $(CP) -Djna.library.path="$(ABS_BIN)" io.quad4.rrc.SmokeTest
+	LIBRARY_PATH="$(ABS_BIN):$${LIBRARY_PATH:-}" \
+	LD_LIBRARY_PATH="$(ABS_BIN):$${LD_LIBRARY_PATH:-}" \
+	LXMF_LIB_PATH="$(ABS_BIN)/liblxmf.so" \
+	LXMF_ROOT="$(abspath $(ROOT))" \
+	$(JAVA) -cp $(CP) -Djna.library.path="$(ABS_BIN)" io.quad4.lxmf.LxmfSmokeTest
 
 check: test
 
 smoke: test
 
-examples: $(RRC_LIB) classes
+examples: $(RRC_LIB) $(LXMF_LIB) classes
 	$(MAKE) -C examples/smoke
 	$(MAKE) -C examples/hub-client
+	$(MAKE) -C examples/lxmf-roundtrip
 
-.PHONY: examples/hub-client
+.PHONY: examples/hub-client examples/lxmf-roundtrip
 examples/hub-client: $(RRC_LIB) classes
 	$(MAKE) -C examples/hub-client
+
+examples/lxmf-roundtrip: $(LXMF_LIB) classes
+	$(MAKE) -C examples/lxmf-roundtrip
 
 clean:
 	rm -rf $(OUT)

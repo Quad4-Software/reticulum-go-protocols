@@ -8,7 +8,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
-func TestOracleDefaultConfigMatchesLXST(t *testing.T) {
+func TestDefaultConfigMatchesLXST(t *testing.T) {
 	cfg := call.DefaultConfig()
 	if cfg.AppName != "lxst" || cfg.AspectName != "telephony" {
 		t.Fatalf("app %s aspect %s", cfg.AppName, cfg.AspectName)
@@ -28,7 +28,7 @@ func TestOracleDefaultConfigMatchesLXST(t *testing.T) {
 	t.Log("DEFAULT_CONFIG_PROVED")
 }
 
-func TestOracleNewCallAppliesProfile(t *testing.T) {
+func TestNewCallAppliesProfile(t *testing.T) {
 	c := call.NewCall(nil, call.Config{UseAudio: false, Profile: proto.ProfileBandwidthLow})
 	if c.Profile() != proto.ProfileBandwidthLow {
 		t.Fatalf("profile %d", c.Profile())

@@ -11,14 +11,15 @@ func (r *Router) compileStats() map[string]any {
 	if !r.propagationEnabled {
 		return nil
 	}
-	peerStats := map[string]any{}
+	peerStats := map[any]any{}
 	r.peersMu.RLock()
-	for key, peer := range r.peers {
+	for _, peer := range r.peers {
 		peerType := "discovered"
 		if r.isStaticPeer(peer.DestinationHash) {
 			peerType = "static"
 		}
-		peerStats[key] = map[string]any{
+		// Upstream keys peer stats by the raw destination hash bytes.
+		peerStats[peer.DestinationHash] = map[string]any{
 			"type":                   peerType,
 			"state":                  peer.State,
 			"alive":                  peer.Alive,

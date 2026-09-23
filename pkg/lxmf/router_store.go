@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -256,13 +257,15 @@ func (ms *MessageStore) TotalBytes() int64 {
 }
 
 // Weight returns the cull weight for one entry (lower is kept longer).
+// The age weight divisor matches upstream at four days.
 func (ms *MessageStore) Weight(transientID []byte) float64 {
 	ent, ok := ms.Get(transientID)
 	if !ok {
 		return 0
 	}
 	now := time.Now().Unix()
-	ageWeight := float64(max(1, (now-int64(ent.ReceivedAt))/((24*60*60)/4)))
+	// Upstream uses float division so age weight is fractional.
+	ageWeight := math.Max(1, float64(now-int64(ent.ReceivedAt))/(4*24*60*60))
 	priority := 1.0
 	if key, ok := destIDFrom(ent.DestinationHash); ok {
 		if _, hit := ms.prioritisedDest[key]; hit {
@@ -327,7 +330,7 @@ func (ms *MessageStore) enforceLimitLocked() int64 {
 	ws := make([]weighted, 0, len(ms.entries))
 	for key, ent := range ms.entries {
 		now := time.Now().Unix()
-		ageWeight := float64(max(1, (now-int64(ent.ReceivedAt))/((24*60*60)/4)))
+		ageWeight := math.Max(1, float64(now-int64(ent.ReceivedAt))/(4*24*60*60))
 		priority := 1.0
 		if key, ok := destIDFrom(ent.DestinationHash); ok {
 			if _, hit := ms.prioritisedDest[key]; hit {
@@ -366,10 +369,32 @@ func (ms *MessageStore) addUnhandledPeer(transientID, peerHash []byte) {
 	if !ok {
 		return
 	}
-	if slices.Contains(ent.UnhandledPeers, peerKey) {
+	// Upstream only queues a message as unhandled when the peer has not
+	// already handled it.
+	if slices.Contains(ent.HandledPeers, peerKey) || slices.Contains(ent.UnhandledPeers, peerKey) {
 		return
 	}
 	ent.UnhandledPeers = append(ent.UnhandledPeers, peerKey)
+}
+
+// removeUnhandledPeer drops peerHash from the unhandled list only, used
+// when a peer must not be offered the entry again without marking it
+// handled, matching upstream remove_unhandled_message.
+func (ms *MessageStore) removeUnhandledPeer(transientID, peerHash []byte) {
+	key := hex.EncodeToString(transientID)
+	peerKey := hex.EncodeToString(peerHash)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ent, ok := ms.entries[key]
+	if !ok {
+		return
+	}
+	for i, p := range ent.UnhandledPeers {
+		if p == peerKey {
+			ent.UnhandledPeers = append(ent.UnhandledPeers[:i], ent.UnhandledPeers[i+1:]...)
+			break
+		}
+	}
 }
 
 func (ms *MessageStore) markHandled(transientID, peerHash []byte) {

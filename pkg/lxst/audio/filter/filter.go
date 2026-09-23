@@ -14,7 +14,7 @@ const (
 	int16Min      = -32768
 	agcSmoothOld  = 0.9
 	agcSmoothNew  = 0.1
-	agcMaxGain    = 8
+	agcMaxGain    = 15.85
 	agcMinGain    = 0.05
 	agcFloorRMS   = 1
 	echoEnergyMin = 1e6
@@ -78,11 +78,13 @@ type AGC struct {
 	paused bool
 }
 
+// NewAGC builds an AGC around a dBFS target. Upstream LXST maps dB to linear
+// with 10^(db/10) (target_linear and max_gain_linear); match that convention.
 func NewAGC(targetDB float64) *AGC {
 	if targetDB == 0 {
 		targetDB = defaultAGCdB
 	}
-	return &AGC{target: math.Pow(10, targetDB/20) * pcmFullScale, gain: 1}
+	return &AGC{target: math.Pow(10, targetDB/10) * pcmFullScale, gain: 1}
 }
 
 func (a *AGC) Pause()  { a.paused = true }
@@ -155,11 +157,13 @@ func clamp16(v float64) int16 {
 	return int16(v)
 }
 
+// ApplyGain scales samples by a decibel gain. LXST upstream converts dB to a
+// linear factor with 10^(db/10) in Mixer and file sources; match that here.
 func ApplyGain(pcm []int16, db float64) {
 	if db == 0 || len(pcm) == 0 {
 		return
 	}
-	g := math.Pow(10, db/20)
+	g := math.Pow(10, db/10)
 	for i, s := range pcm {
 		pcm[i] = clamp16(float64(s) * g)
 	}

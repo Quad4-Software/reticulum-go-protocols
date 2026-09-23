@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Quad4-Software/pbt/pkg/pbt"
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/media"
 )
 
-func TestOracleReorderThenPlay(t *testing.T) {
+func TestJitterBufferReorderThenPop(t *testing.T) {
 	jb := media.NewJitterBuffer(20, 8)
 	now := time.Now()
 	jb.Push(2, 40, []byte("b"))
@@ -23,7 +24,7 @@ func TestOracleReorderThenPlay(t *testing.T) {
 	}
 }
 
-func TestOracleMissingFrameSkipCountsLoss(t *testing.T) {
+func TestJitterBufferMissingFrameCountsLoss(t *testing.T) {
 	jb := media.NewJitterBuffer(40, 8)
 	now := time.Now()
 	jb.Push(1, 1, []byte{1})
@@ -47,4 +48,22 @@ func TestOracleMissingFrameSkipCountsLoss(t *testing.T) {
 	if jb.LossRate() == 0 {
 		t.Fatal("skip must count loss")
 	}
+}
+
+func TestJitterBufferInOrderPop(t *testing.T) {
+	gen := pbt.IntRange(1, 32)
+	pbt.Check(t, pbt.ForAll("in-order jitter pops sequential seqs", gen, func(n int) bool {
+		jb := media.NewJitterBuffer(20, n+4)
+		now := time.Now()
+		for i := range n {
+			jb.Push(uint16(i), uint32(i), []byte{byte(i)})
+		}
+		for i := range n {
+			f, ok := jb.PopReady(now.Add(time.Duration(i) * time.Millisecond))
+			if !ok || f.Sequence != uint16(i) {
+				return false
+			}
+		}
+		return true
+	}), pbt.WithRuns(50))
 }

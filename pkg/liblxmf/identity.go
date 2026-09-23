@@ -21,6 +21,41 @@ func IdentityGenerate() (uint64, int) {
 	return handles.insert(kindIdentity, &identityRecord{identity: id}), OK
 }
 
+func IdentityLoad(path string) (uint64, int) {
+	if path == "" {
+		return 0, setLastError(errInvalidArg)
+	}
+	for i := 0; i < len(path); i++ {
+		if path[i] == 0 {
+			return 0, setLastError(errInvalidArg)
+		}
+	}
+	id, err := identity.LoadIdentityFile(path, nil)
+	if err != nil {
+		return 0, setLastError(err)
+	}
+	return handles.insert(kindIdentity, &identityRecord{identity: id}), OK
+}
+
+func IdentitySave(handle uint64, path string) int {
+	if path == "" {
+		return setLastError(errInvalidArg)
+	}
+	for i := 0; i < len(path); i++ {
+		if path[i] == 0 {
+			return setLastError(errInvalidArg)
+		}
+	}
+	rec, err := identityByHandle(handle)
+	if err != nil {
+		return setLastError(err)
+	}
+	if err := rec.identity.ToFile(path); err != nil {
+		return setLastError(err)
+	}
+	return OK
+}
+
 func IdentityDestroy(handle uint64) int {
 	if !handles.delete(handle) {
 		return setLastError(errInvalidHandle)

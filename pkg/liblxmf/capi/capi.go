@@ -65,6 +65,25 @@ func lxmf_identity_generate() C.uint64_t {
 	return C.uint64_t(id)
 }
 
+//export lxmf_identity_load
+func lxmf_identity_load(path *C.char) C.uint64_t {
+	p := ""
+	if path != nil {
+		p = C.GoString(path)
+	}
+	id, _ := liblxmf.IdentityLoad(p)
+	return C.uint64_t(id)
+}
+
+//export lxmf_identity_save
+func lxmf_identity_save(identity C.uint64_t, path *C.char) C.int {
+	p := ""
+	if path != nil {
+		p = C.GoString(path)
+	}
+	return cCode(liblxmf.IdentitySave(uint64(identity), p))
+}
+
 //export lxmf_identity_destroy
 func lxmf_identity_destroy(identity C.uint64_t) C.int {
 	return cCode(liblxmf.IdentityDestroy(uint64(identity)))
@@ -138,6 +157,40 @@ func lxmf_message_pack(message, identity C.uint64_t, out *C.uint8_t, outLen C.si
 	return writeBytes(out, outLen, written, data)
 }
 
+//export lxmf_message_encrypted_payload
+func lxmf_message_encrypted_payload(message C.uint64_t, out *C.uint8_t, outLen C.size_t, written *C.size_t) C.int {
+	data, code := liblxmf.MessageEncryptedPayload(uint64(message))
+	if code != liblxmf.OK {
+		return cCode(code)
+	}
+	return writeBytes(out, outLen, written, data)
+}
+
+//export lxmf_message_pack_propagated
+func lxmf_message_pack_propagated(
+	message, identity C.uint64_t,
+	recipientHash *C.uint8_t, recipientHashLen C.size_t,
+	recipientPublicKey *C.uint8_t, recipientPublicKeyLen C.size_t,
+	pnStampCost C.int,
+	out *C.uint8_t, outLen C.size_t, written *C.size_t,
+) C.int {
+	hash, code := goBytesFromC(recipientHash, recipientHashLen)
+	if code != liblxmf.OK {
+		return cCode(code)
+	}
+	pk, code := goBytesFromC(recipientPublicKey, recipientPublicKeyLen)
+	if code != liblxmf.OK {
+		return cCode(code)
+	}
+	data, code := liblxmf.MessagePackPropagated(
+		uint64(message), uint64(identity), hash, pk, int(pnStampCost),
+	)
+	if code != liblxmf.OK {
+		return cCode(code)
+	}
+	return writeBytes(out, outLen, written, data)
+}
+
 //export lxmf_message_unpack
 func lxmf_message_unpack(data *C.uint8_t, dataLen C.size_t) C.uint64_t {
 	raw, code := goBytesFromC(data, dataLen)
@@ -184,6 +237,15 @@ func lxmf_message_get_content(message C.uint64_t, buf *C.char, bufLen C.size_t, 
 	return writeString(buf, bufLen, written, s)
 }
 
+//export lxmf_message_get_hash
+func lxmf_message_get_hash(message C.uint64_t, out *C.uint8_t, outLen C.size_t, written *C.size_t) C.int {
+	data, code := liblxmf.MessageGetHash(uint64(message))
+	if code != liblxmf.OK {
+		return cCode(code)
+	}
+	return writeBytes(out, outLen, written, data)
+}
+
 //export lxmf_message_set_fields_json
 func lxmf_message_set_fields_json(message C.uint64_t, json *C.char) C.int {
 	if json == nil {
@@ -227,6 +289,65 @@ func lxmf_message_unpack_verified(data *C.uint8_t, dataLen C.size_t, identity C.
 //export lxmf_message_destroy
 func lxmf_message_destroy(message C.uint64_t) C.int {
 	return cCode(liblxmf.MessageDestroy(uint64(message)))
+}
+
+//export lxmf_stamp_cost_from_app_data
+func lxmf_stamp_cost_from_app_data(appData *C.uint8_t, appDataLen C.size_t, costOut *C.int64_t) C.int {
+	if costOut == nil {
+		return cCode(liblxmf.ErrInvalidArg)
+	}
+	raw, code := goBytesFromC(appData, appDataLen)
+	if code != liblxmf.OK {
+		*costOut = 0
+		return cCode(code)
+	}
+	cost, code := liblxmf.StampCostFromAppData(raw)
+	*costOut = C.int64_t(cost)
+	return cCode(code)
+}
+
+//export lxmf_pn_stamp_cost_from_app_data
+func lxmf_pn_stamp_cost_from_app_data(appData *C.uint8_t, appDataLen C.size_t, costOut *C.int64_t) C.int {
+	if costOut == nil {
+		return cCode(liblxmf.ErrInvalidArg)
+	}
+	raw, code := goBytesFromC(appData, appDataLen)
+	if code != liblxmf.OK {
+		*costOut = 0
+		return cCode(code)
+	}
+	cost, code := liblxmf.PNStampCostFromAppData(raw)
+	*costOut = C.int64_t(cost)
+	return cCode(code)
+}
+
+//export lxmf_message_apply_stamp
+func lxmf_message_apply_stamp(message, identity C.uint64_t, stampCost, timeoutMs C.int) C.int {
+	return cCode(liblxmf.MessageApplyStamp(uint64(message), uint64(identity), int(stampCost), int(timeoutMs)))
+}
+
+//export lxmf_encode_announce_app_data
+func lxmf_encode_announce_app_data(displayName *C.char, stampCost C.int64_t, iconName *C.char, fgRGB3, bgRGB3 *C.uint8_t, out *C.uint8_t, outLen C.size_t, written *C.size_t) C.int {
+	name := ""
+	if displayName != nil {
+		name = C.GoString(displayName)
+	}
+	icon := ""
+	if iconName != nil {
+		icon = C.GoString(iconName)
+	}
+	var fg, bg []byte
+	if fgRGB3 != nil {
+		fg = C.GoBytes(unsafe.Pointer(fgRGB3), 3)
+	}
+	if bgRGB3 != nil {
+		bg = C.GoBytes(unsafe.Pointer(bgRGB3), 3)
+	}
+	data, code := liblxmf.EncodeAnnounceAppData(name, int64(stampCost), icon, fg, bg)
+	if code != liblxmf.OK {
+		return cCode(code)
+	}
+	return writeBytes(out, outLen, written, data)
 }
 
 func goBytesFromC(ptr *C.uint8_t, n C.size_t) ([]byte, int) {

@@ -7,7 +7,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/rnv/proto"
 )
 
-func TestPropertyMinProfile(t *testing.T) {
+func TestMinProfileNeverExceedsInputs(t *testing.T) {
 	profiles := []int{proto.ProfileUltraLow, proto.ProfileLow, proto.ProfileMedium, proto.ProfileHigh}
 	for i := range profiles {
 		for j := range profiles {

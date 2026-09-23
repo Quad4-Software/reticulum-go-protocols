@@ -3,6 +3,7 @@ package lxmf
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -136,6 +137,24 @@ func (m *Messenger) SendPropagatedWithRetry(msg *LXMessage, registry *Propagatio
 
 	Info("propagation send starting", "candidates", len(candidates), "max_attempts", maxAttempts)
 
+	signer := m.dest.GetIdentity()
+	if signer == nil {
+		return nil, errors.New("lxmf: local destination has no identity")
+	}
+	m.prepareOutbound(msg)
+	if _, err := msg.Pack(signer); err != nil {
+		return nil, err
+	}
+	stamped, err := m.stampOutbound(context.Background(), msg)
+	if err != nil {
+		return nil, err
+	}
+	if stamped {
+		if _, err := msg.Pack(signer); err != nil {
+			return nil, fmt.Errorf("re-pack with stamp: %w", err)
+		}
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		node := candidates[attempt]
@@ -183,29 +202,13 @@ func (m *Messenger) SendPropagatedWithRetry(msg *LXMessage, registry *Propagatio
 	return nil, ErrNoPropagationNode
 }
 
-// SendStampedPropagatedWithRetry is SendPropagatedWithRetry after generating a delivery stamp.
+// SendStampedPropagatedWithRetry is SendPropagatedWithRetry with a required delivery stamp cost.
 func (m *Messenger) SendStampedPropagatedWithRetry(msg *LXMessage, registry *PropagationRegistry, preferred []byte, stampCost, maxAttempts int) (*PropagationNode, error) {
 	if msg == nil {
 		return nil, errors.New("lxmf: nil message")
 	}
-	signer := m.dest.GetIdentity()
-	if signer == nil {
-		return nil, errors.New("lxmf: local destination has no identity")
-	}
-	if _, err := msg.Pack(signer); err != nil {
-		return nil, fmt.Errorf("pre-pack: %w", err)
-	}
 	if stampCost > 0 {
-		stamp, value, err := generateStampWithLog(msg.Hash, stampCost)
-		if err != nil {
-			return nil, err
-		}
-		msg.Stamp = stamp
-		msg.StampValue = value
-		msg.StampValid = true
-		if _, err := msg.Pack(signer); err != nil {
-			return nil, fmt.Errorf("re-pack with stamp: %w", err)
-		}
+		msg.StampCost = &stampCost
 	}
 	return m.SendPropagatedWithRetry(msg, registry, preferred, maxAttempts)
 }

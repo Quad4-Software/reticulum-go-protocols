@@ -171,7 +171,8 @@ func (r *Router) savePeers() {
 
 func (r *Router) cleanTransientCaches() {
 	now := float64(time.Now().Unix())
-	const maxAge = float64(messageExpirySeconds)
+	// Upstream keeps transient id caches for MESSAGE_EXPIRY*6.
+	const maxAge = float64(messageExpirySeconds) * 6
 
 	r.deliveredMu.Lock()
 	for k, ts := range r.locallyDelivered {

@@ -5,7 +5,7 @@ package lxmf
 const AppName = "lxmf"
 
 // Version is the LXMF package version aligned with upstream LXMF.
-const Version = "1.1.0"
+const Version = "1.1.1"
 
 // Wire layout sizes for packed LXMF messages.
 const (

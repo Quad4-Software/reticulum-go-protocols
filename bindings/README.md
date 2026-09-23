@@ -25,19 +25,20 @@ Artifacts land in `bin/` with public headers under `include/`.
 |-----------|-------------|-------|
 | [`python/`](python/) | librrc, libmf, liblxmf, liblxst | ctypes |
 | [`rust/`](rust/) | librrc | Safe Rust over `extern` |
-| [`java/`](java/) | librrc | JNA over C ABI |
+| [`java/`](java/) | librrc, liblxmf | JNA over C ABI (`io.quad4.rrc`, `io.quad4.lxmf`) |
+| [`kotlin/`](kotlin/) | liblxmf | Thin Kotlin facade over Java JNA (`io.quad4.lxmf.kotlin`) |
 | [`lua/`](lua/) | librrc | LuaJIT FFI |
 | [`c/`](c/) | librrc, libmf, liblxst | Direct C examples |
 | [`cpp/`](cpp/) | librrc, libmf, liblxst | CMake smoke tests |
 
-Each RRC binding keeps demos under `bindings/<lang>/examples/` (`smoke`, `codec-roundtrip`, `hub-client`). Codec bindings add `mf-smoke` / `lxmf-smoke` / `lxst-smoke` (C) or `lxmf-roundtrip` / `lxst-roundtrip` (Python).
+Each RRC binding keeps demos under `bindings/<lang>/examples/` (`smoke`, `codec-roundtrip`, `hub-client`). Codec bindings add `mf-smoke` / `lxmf-smoke` / `lxst-smoke` (C) or `lxmf-roundtrip` / `lxst-roundtrip` (Python, Java, Kotlin).
 
 ## Build, test, examples
 
 ```bash
 task build-bindings
-task test-bindings     # python, rust, java, lua, c, cpp
-task test-codec        # mf/lxmf/lxst Go + Python codec tests
+task test-bindings     # python, rust, java, kotlin, lua, c, cpp
+task test-codec        # mf/lxmf/lxst Go + Python/Java/Kotlin codec tests
 task test-hub-client   # live UDP loopback hub-client (Go + all RRC bindings)
 ```
 

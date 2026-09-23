@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LicenseRef-Reticulum
-"""Dump LXST 0.5.1 constants and umsgpack wire bytes for Go oracles."""
+"""Dump LXST 0.5.3 constants and umsgpack wire bytes for Go oracles."""
 
 import hashlib
 import json

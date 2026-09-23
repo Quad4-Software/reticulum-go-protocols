@@ -8,7 +8,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
-func TestOracleAvailableWire(t *testing.T) {
+func TestPackSignallingAvailableWire(t *testing.T) {
 	raw, err := proto.PackSignalling([]int{proto.StatusAvailable})
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +20,7 @@ func TestOracleAvailableWire(t *testing.T) {
 	t.Log("AVAILABLE_WIRE_PROVED")
 }
 
-func TestOracleBusyWire(t *testing.T) {
+func TestPackSignallingBusyWire(t *testing.T) {
 	raw, err := proto.PackSignalling([]int{proto.StatusBusy})
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestOracleBusyWire(t *testing.T) {
 	t.Log("BUSY_WIRE_PROVED")
 }
 
-func TestOracleEstablishedWire(t *testing.T) {
+func TestPackSignallingEstablishedWire(t *testing.T) {
 	raw, err := proto.PackSignalling([]int{proto.StatusEstablished})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestOracleEstablishedWire(t *testing.T) {
 	}
 }
 
-func TestOraclePreferredProfileMedium(t *testing.T) {
+func TestPreferredProfileSignalMedium(t *testing.T) {
 	sig := proto.SignalPreferredProfile(proto.ProfileQualityMedium)
 	if sig != proto.PreferredProfile+proto.ProfileQualityMedium {
 		t.Fatalf("signal %d", sig)

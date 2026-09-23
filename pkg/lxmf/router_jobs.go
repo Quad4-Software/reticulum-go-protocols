@@ -3,14 +3,63 @@ package lxmf
 
 import (
 	"time"
+
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
 )
 
+// Job intervals are counted in processing ticks matching upstream
+// LXMRouter JOB_* constants, where one tick is PROCESSING_INTERVAL.
 const (
 	jobProcessingInterval = 4 * time.Second
-	jobTransientInterval  = 60 * time.Second
-	jobStoreInterval      = 120 * time.Second
-	jobPeerSyncInterval   = 6 * time.Second
+	jobLinksTicks         = 1
+	jobTransientTicks     = 60
+	jobStoreTicks         = 120
+	jobPeerSyncTicks      = 6
+	jobPeerRotateTicks    = 56 * jobPeerSyncTicks
 )
+
+// Inbound link inactivity limits match upstream LXMRouter
+// LINK_MAX_INACTIVITY and P_LINK_MAX_INACTIVITY.
+const (
+	linkMaxInactivitySeconds  = 10 * 60
+	pLinkMaxInactivitySeconds = 3 * 60
+)
+
+// cleanLinks tears down inbound links that have been inactive beyond
+// the upstream limits, matching LXMRouter.clean_links.
+func (r *Router) cleanLinks() {
+	var stale []*link.Link
+	r.linksMu.Lock()
+	for key, lnk := range r.directLinks {
+		if lnk.NoDataFor() > linkMaxInactivitySeconds {
+			stale = append(stale, lnk)
+			delete(r.directLinks, key)
+		}
+	}
+	for key, lnk := range r.propLinks {
+		if lnk.NoDataFor() > pLinkMaxInactivitySeconds {
+			stale = append(stale, lnk)
+			delete(r.propLinks, key)
+		}
+	}
+	r.linksMu.Unlock()
+	for _, lnk := range stale {
+		lnk.Teardown()
+	}
+}
+
+// cleanThrottledPeers drops expired throttle entries, matching upstream
+// LXMRouter.clean_throttled_peers.
+func (r *Router) cleanThrottledPeers() {
+	now := float64(time.Now().Unix())
+	r.propMu.Lock()
+	for key, until := range r.throttledPeers {
+		if now >= until {
+			delete(r.throttledPeers, key)
+		}
+	}
+	r.propMu.Unlock()
+}
 
 func (r *Router) jobLoop() {
 	defer r.wg.Done()
@@ -36,22 +85,29 @@ func (r *Router) runJobs(tick int64) {
 		}
 	}()
 
-	if tick%int64(jobTransientInterval/jobProcessingInterval) == 0 {
+	if tick%jobLinksTicks == 0 {
+		r.cleanLinks()
+	}
+	if tick%jobTransientTicks == 0 {
 		r.cleanTransientCaches()
 	}
 
 	if r.propagationEnabled {
-		if tick%int64(jobStoreInterval/jobProcessingInterval) == 0 {
+		if tick%jobStoreTicks == 0 {
 			if r.store != nil {
 				r.store.CleanExpired()
 				r.store.CleanToLimit()
 			}
 		}
-		if tick%int64(jobPeerSyncInterval/jobProcessingInterval) == 0 {
+		if tick%jobPeerSyncTicks == 0 {
 			r.flushPeerDistribution()
 			r.syncPeers()
+			r.cleanThrottledPeers()
 			r.savePeers()
 			r.saveNodeStats()
+		}
+		if tick%jobPeerRotateTicks == 0 {
+			r.rotatePeers()
 		}
 	}
 

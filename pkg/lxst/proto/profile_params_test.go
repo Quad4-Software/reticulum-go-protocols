@@ -8,7 +8,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
-var propertyProfiles = []int{
+var allProfiles = []int{
 	proto.ProfileBandwidthUltraLow,
 	proto.ProfileBandwidthVeryLow,
 	proto.ProfileBandwidthLow,
@@ -20,9 +20,9 @@ var propertyProfiles = []int{
 	proto.DefaultProfile,
 }
 
-func TestPropertyFrameSamplesMatchRate(t *testing.T) {
-	pbt.Check(t, pbt.ForAll("frame samples = rate * ms / 1000", pbt.IntRange(0, len(propertyProfiles)-1), func(i int) bool {
-		p := proto.ProfileParams(propertyProfiles[i])
+func TestProfileParamsFrameSamplesMatchRate(t *testing.T) {
+	pbt.Check(t, pbt.ForAll("frame samples = rate * ms / 1000", pbt.IntRange(0, len(allProfiles)-1), func(i int) bool {
+		p := proto.ProfileParams(allProfiles[i])
 		if p.SampleRate <= 0 || p.FrameMs <= 0 {
 			return false
 		}
@@ -39,9 +39,9 @@ func TestPropertyFrameSamplesMatchRate(t *testing.T) {
 	}), pbt.WithRuns(40))
 }
 
-func TestPropertyPreferredSignalRoundTrip(t *testing.T) {
-	pbt.Check(t, pbt.ForAll("profile signal round trip", pbt.IntRange(0, len(propertyProfiles)-1), func(i int) bool {
-		p := propertyProfiles[i]
+func TestSignalPreferredProfileRoundTrip(t *testing.T) {
+	pbt.Check(t, pbt.ForAll("profile signal round trip", pbt.IntRange(0, len(allProfiles)-1), func(i int) bool {
+		p := allProfiles[i]
 		sig := proto.SignalPreferredProfile(p)
 		if !proto.IsPreferredProfile(sig) {
 			return false

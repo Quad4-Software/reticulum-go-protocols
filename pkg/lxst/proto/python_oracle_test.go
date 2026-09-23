@@ -59,9 +59,9 @@ func loadPythonOracle(t *testing.T) pythonOracle {
 	return o
 }
 
-func TestOraclePythonLXSTConstants(t *testing.T) {
+func TestLXSTConstantsMatchPython(t *testing.T) {
 	o := loadPythonOracle(t)
-	if o.Version != "0.5.1" {
+	if o.Version != "0.5.3" {
 		t.Fatalf("lxst version %s", o.Version)
 	}
 	if o.App != proto.AppName || o.Aspect != proto.AspectName {
@@ -173,7 +173,7 @@ func TestOraclePythonLXSTConstants(t *testing.T) {
 	t.Log("PYTHON_LXST_CONSTANTS_PROVED")
 }
 
-func TestOraclePythonUmsgpackWire(t *testing.T) {
+func TestUmsgpackWireMatchesPython(t *testing.T) {
 	o := loadPythonOracle(t)
 	cases := []struct {
 		name string

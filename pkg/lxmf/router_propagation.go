@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
@@ -35,6 +37,22 @@ func (r *Router) propagationLinkEstablished(v any) {
 	lnk.SetResourceConcludedCallback(func(res any) {
 		r.propagationResourceConcluded(res, lnk)
 	})
+	linkKey := hex.EncodeToString(lnk.GetLinkID())
+	r.linksMu.Lock()
+	r.propLinks[linkKey] = lnk
+	r.linksMu.Unlock()
+	// Dropping inbound sync link accounting on close matches upstream
+	// clean_links, which clears validated_peer_links on teardown.
+	lnk.SetLinkClosedCallback(func(closed *link.Link) {
+		closedKey := hex.EncodeToString(closed.GetLinkID())
+		r.propMu.Lock()
+		delete(r.validatedPeerLinks, closedKey)
+		delete(r.acceptedOfferLinks, closedKey)
+		r.propMu.Unlock()
+		r.linksMu.Lock()
+		delete(r.propLinks, closedKey)
+		r.linksMu.Unlock()
+	})
 }
 
 func (r *Router) handlePropagationPacket(data []byte, pkt *packet.Packet, lnk *link.Link) {
@@ -60,15 +78,11 @@ func (r *Router) handlePropagationPacket(data []byte, pkt *packet.Packet, lnk *l
 		}
 	}
 
-	if len(raw) == 0 {
-		return
-	}
-
 	minCost := max(0, r.cfg.Propagation.PropagationStampCostTarget-r.cfg.Propagation.PropagationStampCostFlexibility)
 	validated := ValidatePNStamps(raw, minCost)
 
 	for _, entry := range validated {
-		r.lxmfPropagation(entry.LxmData, int64(entry.Value), entry.Stamp, nil)
+		r.lxmfPropagation(entry.LxmData, int64(entry.Value), entry.Stamp, nil, false)
 		r.clientPropagationReceived++
 	}
 
@@ -122,12 +136,22 @@ func (r *Router) propagationResourceAdvertised(adv any, lnk *link.Link) bool {
 }
 
 func (r *Router) propagationResourceConcluded(res any, lnk *link.Link) {
+	linkID := hex.EncodeToString(lnk.GetLinkID())
+	// Upstream pops the inbound sync accounting entry when the transfer
+	// concludes, whether it completed or failed.
+	defer func() {
+		r.propMu.Lock()
+		delete(r.acceptedOfferLinks, linkID)
+		r.propMu.Unlock()
+	}()
+
 	data := extractResourceData(res)
 	if len(data) == 0 {
 		return
 	}
+	// Upstream requires exactly [timebase, messages] for sync resources.
 	var payload []any
-	if err := msgpack.Unmarshal(data, &payload); err != nil || len(payload) < 2 {
+	if err := msgpack.Unmarshal(data, &payload); err != nil || len(payload) != 2 {
 		return
 	}
 	messages, ok := payload[1].([]any)
@@ -142,7 +166,6 @@ func (r *Router) propagationResourceConcluded(res any, lnk *link.Link) {
 	}
 	r.tryAutopeerFromIncomingSync(remotePropHash)
 
-	linkID := hex.EncodeToString(lnk.GetLinkID())
 	r.propMu.Lock()
 	peeringValidated := r.validatedPeerLinks[linkID]
 	r.propMu.Unlock()
@@ -164,12 +187,12 @@ func (r *Router) propagationResourceConcluded(res any, lnk *link.Link) {
 		return
 	}
 
-	bypassSeq := !r.cfg.Propagation.FromStaticOnly && remotePropHash != nil && r.isStaticPeer(remotePropHash)
-	if !bypassSeq && r.cfg.Propagation.EnableNode {
+	if remotePropHash != nil {
+		// Upstream records the inbound sync as validating whenever the
+		// remote identity is known, regardless of bypass state.
 		r.propMu.Lock()
-		if remotePropHash != nil {
-			r.validatingFrom[peerKey(remotePropHash)] = float64(time.Now().Unix())
-		}
+		r.acceptedOfferLinks[linkID] = OfferValidating
+		r.validatingFrom[peerKey(remotePropHash)] = float64(time.Now().Unix())
 		r.propMu.Unlock()
 	}
 
@@ -184,7 +207,7 @@ func (r *Router) propagationResourceConcluded(res any, lnk *link.Link) {
 	}
 
 	for _, entry := range validated {
-		r.lxmfPropagation(entry.LxmData, int64(entry.Value), entry.Stamp, fromPeer)
+		r.lxmfPropagation(entry.LxmData, int64(entry.Value), entry.Stamp, fromPeer, false)
 		if fromPeer != nil {
 			fromPeer.Incoming++
 			fromPeer.RXBytes += int64(len(entry.LxmData))
@@ -213,58 +236,95 @@ func (r *Router) propagationResourceConcluded(res any, lnk *link.Link) {
 	}
 }
 
+// remoteIdentityGrace bounds how long a request handler waits for an
+// in-flight identify packet to register the link's remote identity.
+// Inbound packets are dispatched by parallel workers, so an identify
+// sent right after link establishment can still be in flight. Upstream
+// processes inbound packets serially and never observes that ordering.
+const remoteIdentityGrace = 2 * time.Second
+
+// requestRemoteIdentity resolves the remote identity for a link-bound
+// request, waiting briefly when the identify has not landed yet.
+func (r *Router) requestRemoteIdentity(linkID []byte, remoteIdentity *identity.Identity) *identity.Identity {
+	if remoteIdentity != nil {
+		return remoteIdentity
+	}
+	key := hex.EncodeToString(linkID)
+	deadline := time.Now().Add(remoteIdentityGrace)
+	for time.Now().Before(deadline) {
+		r.linksMu.Lock()
+		lnk := r.propLinks[key]
+		if lnk == nil {
+			lnk = r.directLinks[key]
+		}
+		if lnk == nil {
+			lnk = r.controlLinks[key]
+		}
+		r.linksMu.Unlock()
+		if lnk == nil {
+			return nil
+		}
+		if id := lnk.GetRemoteIdentity(); id != nil {
+			return id
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil
+}
+
 func (r *Router) offerRequestHandler(path string, data []byte, requestID, linkID []byte, remoteIdentity *identity.Identity, requestedAt int64) any {
 	_ = path
 	_ = requestID
 	_ = requestedAt
 
+	remoteIdentity = r.requestRemoteIdentity(linkID, remoteIdentity)
 	if remoteIdentity == nil {
-		return []byte{PeerErrorNoIdentity}
+		return int(PeerErrorNoIdentity)
 	}
 	remotePropHash, err := PropagationDestinationHash(remoteIdentity)
 	if err != nil {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 	remoteKey := peerKey(remotePropHash)
 	linkKey := hex.EncodeToString(linkID)
 
-	if r.throttled(remoteKey) {
-		return []byte{PeerErrorThrottled}
-	}
-
-	bypassSeq := r.isStaticPeer(remotePropHash)
+	bypassSeq := r.isStaticPeer(remotePropHash) && r.cfg.Propagation.StaticPeersBypassSequential
 	r.propMu.Lock()
-	seqBusy := len(r.validatingFrom) > 0
-	syncBusy := r.propagationResourcesTransferring() >= maxInboundSyncs(r)
+	seqBusy := r.cfg.Propagation.SequentialPNStampValidation && len(r.validatingFrom) > 0
+	syncBusy := maxInboundSyncs(r) > 0 && r.propagationResourcesTransferring() >= maxInboundSyncs(r)
 	r.propMu.Unlock()
 
 	if !bypassSeq && seqBusy {
-		return []byte{PeerErrorThrottled}
+		return int(PeerErrorThrottled)
 	}
 	if !bypassSeq && syncBusy {
-		return []byte{PeerErrorThrottled}
+		return int(PeerErrorThrottled)
+	}
+
+	if r.throttled(remoteKey) {
+		return int(PeerErrorThrottled)
 	}
 
 	if r.cfg.Propagation.FromStaticOnly && !r.isStaticPeer(remotePropHash) {
-		return []byte{PeerErrorNoAccess}
+		return int(PeerErrorNoAccess)
 	}
 
 	var req []any
 	if err := msgpack.Unmarshal(data, &req); err != nil || len(req) < 2 {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 	peeringKey, ok := req[0].([]byte)
 	if !ok {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 	transientIDs, ok := req[1].([]any)
 	if !ok {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 
 	peeringID := append(append([]byte(nil), r.identity.Hash()...), remoteIdentity.Hash()...)
 	if !ValidatePeeringKey(peeringID, peeringKey, r.cfg.Propagation.PeeringCost) {
-		return []byte{PeerErrorInvalidKey}
+		return int(PeerErrorInvalidKey)
 	}
 
 	r.propMu.Lock()
@@ -286,9 +346,8 @@ func (r *Router) offerRequestHandler(path string, data []byte, requestID, linkID
 		return false
 	}
 	if len(wanted) == len(transientIDs) {
-		r.propMu.Lock()
-		r.acceptedOfferLinks[linkKey] = OfferAccepted
-		r.propMu.Unlock()
+		// Upstream only records an accounting entry for partial
+		// accepts, so a full accept returns true without one.
 		return true
 	}
 	r.propMu.Lock()
@@ -300,35 +359,44 @@ func (r *Router) offerRequestHandler(path string, data []byte, requestID, linkID
 func (r *Router) messageGetRequestHandler(path string, data []byte, requestID, linkID []byte, remoteIdentity *identity.Identity, requestedAt int64) any {
 	_ = path
 	_ = requestID
-	_ = linkID
 	_ = requestedAt
 
+	remoteIdentity = r.requestRemoteIdentity(linkID, remoteIdentity)
 	if remoteIdentity == nil {
-		return []byte{PeerErrorNoIdentity}
+		return int(PeerErrorNoIdentity)
 	}
 	if !r.identityAllowed(remoteIdentity) {
-		return []byte{PeerErrorNoAccess}
+		return int(PeerErrorNoAccess)
 	}
 
 	deliveryHash, err := deliveryDestinationHash(remoteIdentity)
 	if err != nil {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 
 	var req []any
 	if err := msgpack.Unmarshal(data, &req); err != nil || len(req) < 2 {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
+	}
+
+	// Upstream lists available messages only when both fields are
+	// None; explicit empty lists are a get request with no wants.
+	if req[0] == nil && req[1] == nil {
+		return r.store.ListForDestination(deliveryHash)
 	}
 
 	wants := decodeByteList(req[0])
 	haves := decodeByteList(req[1])
 	var transferLimitKB float64
+	limitSet := false
 	if len(req) >= 3 {
-		transferLimitKB = asFloat(req[2])
-	}
-
-	if len(wants) == 0 && len(haves) == 0 {
-		return r.store.ListForDestination(deliveryHash)
+		// Upstream applies the client limit whenever the field parses as
+		// a float, including a literal zero; absent or non-numeric means
+		// unlimited.
+		if f, ok := numericField(req[2]); ok {
+			transferLimitKB = f
+			limitSet = true
+		}
 	}
 
 	for _, tid := range haves {
@@ -359,8 +427,10 @@ func (r *Router) messageGetRequestHandler(path string, data []byte, requestID, l
 		if err != nil {
 			continue
 		}
-		next := cumulative + int64(len(lxm)+perMessageOverhead)
-		if limitBytes > 0 && next > limitBytes {
+		// Upstream measures the stored file size, which includes the
+		// trailing stamp, before stripping it for the response.
+		next := cumulative + int64(len(lxm)+StampSize+perMessageOverhead)
+		if limitSet && next > limitBytes {
 			continue
 		}
 		response = append(response, lxm)
@@ -370,13 +440,20 @@ func (r *Router) messageGetRequestHandler(path string, data []byte, requestID, l
 	return response
 }
 
-func (r *Router) lxmfPropagation(lxmData []byte, stampValue int64, stampData []byte, fromPeer *Peer) bool {
+func (r *Router) lxmfPropagation(lxmData []byte, stampValue int64, stampData []byte, fromPeer *Peer, isPaper bool) bool {
 	if len(lxmData) < Overhead {
 		return false
 	}
 	sum := sha256Sum(lxmData)
 	tidKey := peerKey(sum[:])
 
+	// Upstream ignores data already in the store or the processed
+	// transient id cache.
+	if r.store != nil {
+		if _, ok := r.store.Get(sum[:]); ok {
+			return false
+		}
+	}
 	r.processedMu.Lock()
 	if _, seen := r.locallyProcessed[tidKey]; seen {
 		r.processedMu.Unlock()
@@ -398,7 +475,7 @@ func (r *Router) lxmfPropagation(lxmData []byte, stampValue int64, stampData []b
 			decrypted, err := deliveryDest.Decrypt(lxmData[DestinationLength:])
 			if err == nil && len(decrypted) > 0 {
 				payload := append(append([]byte(nil), destHash...), decrypted...)
-				r.handleDeliveryPayload(payload, MethodPropagated, true, false)
+				r.handleDeliveryPayload(payload, MethodPropagated, isPaper, false)
 				r.deliveredMu.Lock()
 				r.locallyDelivered[tidKey] = float64(time.Now().Unix())
 				r.deliveredMu.Unlock()
@@ -412,6 +489,11 @@ func (r *Router) lxmfPropagation(lxmData []byte, stampValue int64, stampData []b
 	}
 
 	if !r.propagationEnabled || r.store == nil {
+		return false
+	}
+	// Upstream concatenates lxmf_data and stamp_data unconditionally, so
+	// ingest paths without a stamp (paper messages) fail to store.
+	if len(stampData) == 0 {
 		return false
 	}
 
@@ -468,8 +550,9 @@ func (r *Router) propagationResourcesTransferring() int {
 }
 
 func maxInboundSyncs(r *Router) int {
-	if r.cfg.Propagation.MaxPeers > 0 {
-		return maxInboundSyncsDefault
+	// Upstream default is MAX_INBOUND_SYNCS = 3.
+	if r.cfg.Propagation.MaxInboundSyncs > 0 {
+		return r.cfg.Propagation.MaxInboundSyncs
 	}
 	return maxInboundSyncsDefault
 }
@@ -514,6 +597,27 @@ func deliveryDestinationHash(id *identity.Identity) ([]byte, error) {
 	return dest.GetHash(), nil
 }
 
+// numericField mirrors Python float() coercion for request fields, accepting
+// ints, floats, and numeric strings.
+func numericField(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case float32:
+		return float64(x), true
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		iv, ok := asInt64(x)
+		return float64(iv), ok
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		return f, err == nil
+	case []byte:
+		f, err := strconv.ParseFloat(strings.TrimSpace(string(x)), 64)
+		return f, err == nil
+	}
+	return 0, false
+}
+
 func decodeByteList(v any) [][]byte {
 	list, ok := v.([]any)
 	if !ok || len(list) == 0 {
@@ -530,4 +634,22 @@ func decodeByteList(v any) [][]byte {
 
 func sha256Sum(data []byte) [32]byte {
 	return sha256.Sum256(data)
+}
+
+// IngestLXMURI decodes an lxm:// paper URI and feeds the contained message
+// through the propagation ingest path, matching upstream ingest_lxm_uri.
+// Stamp enforcement is skipped for the local delivery leg.
+func (r *Router) IngestLXMURI(uri string) bool {
+	// Upstream accepts the scheme case-insensitively and strips
+	// slashes that appear when a URI wraps across QR lines.
+	u := strings.ToLower(uri)
+	if !strings.HasPrefix(u, uriSchemaPrefix) {
+		return false
+	}
+	encoded := strings.ReplaceAll(uri[len(uriSchemaPrefix):], "/", "")
+	data, err := DecodePaperURI(uriSchemaPrefix + encoded)
+	if err != nil || len(data) == 0 {
+		return false
+	}
+	return r.lxmfPropagation(data, 0, nil, nil, true)
 }

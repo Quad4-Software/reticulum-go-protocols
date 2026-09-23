@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LicenseRef-Reticulum
-"""CPU timing for LXST 0.5.1 pack, unpack, dest hash, and Opus."""
+"""CPU timing for LXST 0.5.3 pack, unpack, dest hash, and Opus."""
 
 import hashlib
 import json

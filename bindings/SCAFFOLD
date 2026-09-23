@@ -25,7 +25,8 @@ Reference bindings already in tree
 
   bindings/python  librrc + libmf + liblxmf (ctypes)
   bindings/rust    librrc wrappers (safe Rust over extern)
-  bindings/java    librrc wrappers (JNA)
+  bindings/java    librrc + liblxmf wrappers (JNA)
+  bindings/kotlin  liblxmf facade over Java JNA
   bindings/lua     librrc wrappers (LuaJIT FFI)
   bindings/c       librrc + libmf direct C examples
   bindings/cpp     librrc + libmf CMake smoke tests
@@ -136,6 +137,7 @@ Authoritative sources
   bindings/python/
   bindings/rust/
   bindings/java/
+  bindings/kotlin/
   bindings/lua/
   bindings/c/
   bindings/cpp/

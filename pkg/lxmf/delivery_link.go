@@ -3,6 +3,7 @@ package lxmf
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -20,11 +21,14 @@ const (
 
 func (m *Messenger) clearDeliveryLink() {
 	m.deliveryLinkMu.Lock()
-	defer m.deliveryLinkMu.Unlock()
-	if m.deliveryLink != nil {
-		m.deliveryLink.Teardown()
-		m.deliveryLink = nil
-		m.deliveryLinkPeer = nil
+	lnk := m.deliveryLink
+	m.deliveryLink = nil
+	m.deliveryLinkPeer = nil
+	m.deliveryLinkMu.Unlock()
+	if lnk != nil {
+		// Teardown invokes the closed callback synchronously, and the
+		// callback takes deliveryLinkMu, so it cannot run under the lock.
+		lnk.Teardown()
 	}
 }
 
@@ -42,12 +46,19 @@ func (m *Messenger) ensureDeliveryLink(peerHash []byte) (*link.Link, error) {
 		m.deliveryLinkMu.Unlock()
 		return lnk, nil
 	}
-	if m.deliveryLink != nil {
-		m.deliveryLink.Teardown()
-		m.deliveryLink = nil
-		m.deliveryLinkPeer = nil
+	// Upstream prefers an already established backchannel link before
+	// opening a new outbound link.
+	if lnk := m.backchannelLinks[hex.EncodeToString(peerHash)]; lnk != nil && lnk.IsActive() {
+		m.deliveryLinkMu.Unlock()
+		return lnk, nil
 	}
+	stale := m.deliveryLink
+	m.deliveryLink = nil
+	m.deliveryLinkPeer = nil
 	m.deliveryLinkMu.Unlock()
+	if stale != nil {
+		stale.Teardown()
+	}
 
 	return m.establishDeliveryLink(peerHash)
 }
@@ -84,14 +95,7 @@ func (m *Messenger) establishDeliveryLink(peerHash []byte) (*link.Link, error) {
 		return nil, fmt.Errorf("delivery destination: %w", err)
 	}
 
-	lnk := link.NewLink(destOut, m.transport, nil, nil, func(closed *link.Link) {
-		m.deliveryLinkMu.Lock()
-		if m.deliveryLink == closed {
-			m.deliveryLink = nil
-			m.deliveryLinkPeer = nil
-		}
-		m.deliveryLinkMu.Unlock()
-	})
+	lnk := link.NewLink(destOut, m.transport, nil, nil, nil)
 
 	if err := lnk.Establish(); err != nil {
 		return nil, fmt.Errorf("delivery link request: %w", err)
@@ -114,6 +118,14 @@ func (m *Messenger) establishDeliveryLink(peerHash []byte) (*link.Link, error) {
 			return nil, fmt.Errorf("delivery link timeout on %s (status=%d)", peerHex, status)
 		}
 		time.Sleep(pathPollInterval)
+	}
+
+	// Upstream wires delivery callbacks on initiator links and performs
+	// backchannel identification so the remote can reply over the same
+	// link.
+	m.wireDeliveryLink(lnk)
+	if id := m.dest.GetIdentity(); id != nil {
+		_ = lnk.Identify(id)
 	}
 
 	m.deliveryLinkMu.Lock()
@@ -152,45 +164,43 @@ func (m *Messenger) sendDirectPacked(msg *LXMessage) error {
 	return nil
 }
 
-// SendDirect packs, signs, and sends via an RNS link (packet or resource).
+// SendDirect packs, signs, stamps when required, and sends via an RNS
+// link (packet or resource).
 func (m *Messenger) SendDirect(msg *LXMessage) error {
-	if msg == nil {
-		return errors.New("lxmf: nil message")
-	}
-	signer := m.dest.GetIdentity()
-	if signer == nil {
-		return errors.New("lxmf: local destination has no identity")
-	}
-	if _, err := msg.Pack(signer); err != nil {
-		return err
-	}
-	return m.sendDirectPacked(msg)
+	return m.sendDirect(context.Background(), msg)
 }
 
-// SendStampedDirect is SendDirect after generating a delivery stamp.
+// SendStampedDirect is SendDirect with a required delivery stamp cost.
 func (m *Messenger) SendStampedDirect(msg *LXMessage, stampCost int) error {
 	if msg == nil {
 		return errors.New("lxmf: nil message")
 	}
-	if stampCost <= 0 {
-		return m.SendDirect(msg)
+	if stampCost > 0 {
+		msg.StampCost = &stampCost
+	}
+	return m.sendDirect(context.Background(), msg)
+}
+
+func (m *Messenger) sendDirect(ctx context.Context, msg *LXMessage) error {
+	if msg == nil {
+		return errors.New("lxmf: nil message")
 	}
 	signer := m.dest.GetIdentity()
 	if signer == nil {
 		return errors.New("lxmf: local destination has no identity")
 	}
+	m.prepareOutbound(msg)
 	if _, err := msg.Pack(signer); err != nil {
-		return fmt.Errorf("pre-pack: %w", err)
+		return err
 	}
-	stamp, value, err := generateStampWithLog(msg.Hash, stampCost)
+	stamped, err := m.stampOutbound(ctx, msg)
 	if err != nil {
-		return fmt.Errorf("stamp generation: %w", err)
+		return err
 	}
-	msg.Stamp = stamp
-	msg.StampValue = value
-	msg.StampValid = true
-	if _, err := msg.Pack(signer); err != nil {
-		return fmt.Errorf("re-pack with stamp: %w", err)
+	if stamped {
+		if _, err := msg.Pack(signer); err != nil {
+			return fmt.Errorf("re-pack with stamp: %w", err)
+		}
 	}
 	return m.sendDirectPacked(msg)
 }

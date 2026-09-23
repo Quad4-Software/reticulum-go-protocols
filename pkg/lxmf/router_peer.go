@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
@@ -166,15 +168,27 @@ func (p *Peer) queueHandled(transientID []byte) {
 }
 
 func (p *Peer) sync() {
-	if p.router == nil || p.State != PeerStateIdle {
+	if p.router == nil {
+		return
+	}
+	// Upstream establishes a new link from IDLE and re-offers on the
+	// existing link from LINK_READY. Other states are in flight.
+	if p.State != PeerStateIdle && p.State != PeerStateLinkReady {
 		return
 	}
 	p.LastSyncAttempt = float64(time.Now().Unix())
 
 	if time.Now().Unix() < int64(p.NextSyncAttempt) {
+		// LXMF: a peer postponed by backoff that we have not heard from
+		// since the last sync attempt is marked not alive.
+		if p.LastSyncAttempt > p.LastHeard {
+			p.Alive = false
+		}
 		return
 	}
-	if p.PropagationStampCost == 0 || p.PeeringCost == 0 {
+	// Upstream requires all announced stamp and peering costs to be
+	// known before syncing. Unset costs are stored as -1.
+	if p.PropagationStampCost < 0 || p.PropagationStampCostFlex < 0 || p.PeeringCost < 0 {
 		return
 	}
 	if !p.peeringKeyReady() {
@@ -188,6 +202,12 @@ func (p *Peer) sync() {
 		time.Sleep(peerPathRequestGrace)
 	}
 	if !tr.HasPath(p.DestinationHash) {
+		// LXMF 1.1.1: an unanswered path request backs off the sync
+		// schedule and marks the peer not alive.
+		p.SyncBackoff += peerSyncBackoffStep
+		p.NextSyncAttempt = float64(time.Now().Unix()) + p.SyncBackoff
+		p.Alive = false
+		Debug("path request was not answered, retrying sync with peer later", "peer", peerKey(p.DestinationHash))
 		return
 	}
 
@@ -204,6 +224,21 @@ func (p *Peer) sync() {
 			return
 		}
 		p.Destination = dest
+	}
+	if p.UnhandledCount(p.router) == 0 {
+		// Upstream completes the sync without establishing a link when
+		// no unhandled messages exist for the peer.
+		return
+	}
+
+	if p.State == PeerStateLinkReady {
+		// Upstream reuses the active link for a new offer round.
+		if p.Link != nil && p.Link.IsActive() {
+			p.sendOffer(p.Link)
+			return
+		}
+		p.Link = nil
+		p.State = PeerStateIdle
 	}
 
 	p.SyncBackoff += peerSyncBackoffStep
@@ -233,9 +268,16 @@ func (p *Peer) sync() {
 		return
 	}
 
+	// Upstream link_established identifies on the link and records the
+	// establishment rate before offering.
+	_ = lnk.Identify(p.router.identity)
+	if rate := lnk.GetEstablishmentRate(); rate > 0 {
+		p.LinkEstablishmentRate = rate
+	}
 	p.State = PeerStateLinkReady
 	p.Alive = true
 	p.LastHeard = float64(time.Now().Unix())
+	p.NextSyncAttempt = 0
 	p.SyncBackoff = 0
 	p.sendOffer(lnk)
 }
@@ -245,31 +287,57 @@ func (p *Peer) sendOffer(lnk *link.Link) {
 		return
 	}
 	minCost := max(0, p.PropagationStampCost-p.PropagationStampCostFlex)
-	ids := make([][]byte, 0)
-	p.LastOffer = nil
+	pk := peerKey(p.DestinationHash)
 
+	type offerEntry struct {
+		key    string
+		tid    []byte
+		weight float64
+		size   int64
+	}
+	entries := make([]offerEntry, 0)
 	for key, ent := range p.router.store.entriesSnapshot() {
+		if !slices.Contains(ent.UnhandledPeers, pk) {
+			continue
+		}
 		tid, err := hex.DecodeString(key)
 		if err != nil {
 			continue
 		}
 		if ent.StampValue < int64(minCost) {
+			// Upstream drops unhandled entries whose stamp value is
+			// lower than the peer requirement so they are not offered
+			// again on the next sync.
+			p.router.store.removeUnhandledPeer(tid, p.DestinationHash)
 			continue
 		}
-		handled := false
-		peerKey := peerKey(p.DestinationHash)
-		if slices.Contains(ent.HandledPeers, peerKey) {
-			handled = true
-		}
-		if handled {
+		entries = append(entries, offerEntry{key: key, tid: tid, weight: p.router.store.Weight(tid), size: ent.Size})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].weight < entries[j].weight })
+
+	const perMessageOverhead = 16
+	cumulative := int64(24)
+	ids := make([][]byte, 0, len(entries))
+	p.LastOffer = nil
+	for _, e := range entries {
+		transferSize := e.size + perMessageOverhead
+		if p.PropagationTransferLimit >= 0 && float64(transferSize) > p.PropagationTransferLimit*1000 {
+			// Exceeds the peer per message transfer limit, so it is
+			// marked handled and never offered to this peer again.
+			p.router.store.markHandled(e.tid, p.DestinationHash)
 			continue
 		}
-		ids = append(ids, tid)
-		p.LastOffer = append(p.LastOffer, key)
+		if p.PropagationSyncLimit >= 0 && float64(cumulative+transferSize) >= p.PropagationSyncLimit*1000 {
+			continue
+		}
+		cumulative += transferSize
+		ids = append(ids, e.tid)
+		p.LastOffer = append(p.LastOffer, e.key)
 	}
 	if len(ids) == 0 {
-		lnk.Teardown()
-		p.State = PeerStateIdle
+		// Upstream completes the sync without sending an offer and
+		// leaves the link active in LINK_READY.
+		p.State = PeerStateLinkReady
 		return
 	}
 
@@ -297,10 +365,55 @@ func (p *Peer) handleOfferResponse(receipt *link.RequestReceipt) {
 	p.State = PeerStateResponseReceived
 	resp := receipt.GetResponseValue()
 
+	var wantedKeys []string
 	switch v := resp.(type) {
-	case []byte:
-		if len(v) == 1 {
-			switch v[0] {
+	case bool:
+		if !v {
+			// Peer already has all advertised messages.
+			for _, key := range p.LastOffer {
+				tid, _ := hex.DecodeString(key)
+				p.router.store.markHandled(tid, p.DestinationHash)
+			}
+			p.Offered += int64(len(p.LastOffer))
+			if p.Link != nil {
+				p.Link.Teardown()
+				p.Link = nil
+			}
+			p.State = PeerStateIdle
+			return
+		}
+		// Peer wants all advertised messages.
+		wantedKeys = p.LastOffer
+	case []any:
+		// Peer wants some advertised messages. Messages it did not
+		// want are already known to it and are marked handled.
+		wanted := make(map[string]struct{}, len(v))
+		for _, item := range v {
+			if b, ok := item.([]byte); ok {
+				wanted[peerKey(b)] = struct{}{}
+			}
+		}
+		for _, key := range p.LastOffer {
+			if _, ok := wanted[key]; !ok {
+				tid, _ := hex.DecodeString(key)
+				p.router.store.markHandled(tid, p.DestinationHash)
+				continue
+			}
+			wantedKeys = append(wantedKeys, key)
+		}
+	default:
+		if code, ok := responseErrorCode(resp); ok {
+			switch code {
+			case PeerErrorNoIdentity:
+				// The remote peer did not receive our identity, so
+				// re-identify on the link and retry the offer.
+				if p.Link != nil {
+					Verbose("remote peer indicated missing identification, retrying")
+					_ = p.Link.Identify(p.router.identity)
+					p.State = PeerStateLinkReady
+					p.sendOffer(p.Link)
+				}
+				return
 			case PeerErrorThrottled:
 				p.NextSyncAttempt = float64(time.Now().Unix()) + pnStampThrottleSeconds
 				return
@@ -309,24 +422,13 @@ func (p *Peer) handleOfferResponse(receipt *link.RequestReceipt) {
 				return
 			}
 		}
-	case bool:
-		if !v {
-			for _, key := range p.LastOffer {
-				tid, _ := hex.DecodeString(key)
-				p.router.store.markHandled(tid, p.DestinationHash)
-			}
-			return
+		// Unknown, empty, or invalid response: abort the sync.
+		if p.Link != nil {
+			p.Link.Teardown()
+			p.Link = nil
 		}
-	}
-
-	wantedKeys := p.LastOffer
-	if list, ok := resp.([]any); ok {
-		wantedKeys = nil
-		for _, item := range list {
-			if b, ok := item.([]byte); ok {
-				wantedKeys = append(wantedKeys, peerKey(b))
-			}
-		}
+		p.State = PeerStateIdle
+		return
 	}
 
 	payloads := make([][]byte, 0, len(wantedKeys))
@@ -341,8 +443,11 @@ func (p *Peer) handleOfferResponse(receipt *link.RequestReceipt) {
 		payloads = append(payloads, data)
 	}
 	if len(payloads) == 0 {
+		// Peer did not request any of the available messages.
+		p.Offered += int64(len(p.LastOffer))
 		if p.Link != nil {
 			p.Link.Teardown()
+			p.Link = nil
 		}
 		p.State = PeerStateIdle
 		return
@@ -357,9 +462,47 @@ func (p *Peer) handleOfferResponse(receipt *link.RequestReceipt) {
 		return
 	}
 	p.State = PeerStateResourceTransferring
-	_ = p.Link.SendResource(res)
-	p.Offered += int64(len(wantedKeys))
+	transferStart := time.Now()
+	if err := p.Link.SendResource(res); err != nil {
+		p.Link.Teardown()
+		p.Link = nil
+		p.State = PeerStateIdle
+		return
+	}
+
+	for _, key := range wantedKeys {
+		tid, _ := hex.DecodeString(key)
+		p.router.store.markHandled(tid, p.DestinationHash)
+	}
+	if elapsed := time.Since(transferStart).Seconds(); elapsed > 0 {
+		p.SyncTransferRate = float64(len(packed)*8) / elapsed
+	}
+	p.Alive = true
+	p.LastHeard = float64(time.Now().Unix())
+	p.Offered += int64(len(p.LastOffer))
 	p.Outgoing += int64(len(wantedKeys))
+	p.TXBytes += int64(len(packed))
+
+	p.Link.Teardown()
+	p.Link = nil
+	p.State = PeerStateIdle
+
+	if p.SyncStrategy == PeerStrategyPersistent && p.UnhandledCount(p.router) > 0 {
+		go p.sync()
+	}
+}
+
+// responseErrorCode extracts a propagation error code from a request
+// response. Upstream sends bare msgpack ints, while older Go peers sent
+// single byte payloads, so both forms are accepted.
+func responseErrorCode(v any) (byte, bool) {
+	if b, ok := v.([]byte); ok && len(b) == 1 {
+		return b[0], true
+	}
+	if n, ok := asInt64(v); ok && n >= 0 && n <= 0xff {
+		return byte(n), true
+	}
+	return 0, false
 }
 
 func peerFromBytes(r *Router, data []byte) (*Peer, error) {
@@ -372,35 +515,95 @@ func peerFromBytes(r *Router, data []byte) (*Peer, error) {
 		return nil, fmt.Errorf("lxmf: invalid peer destination hash")
 	}
 	peer := newPeer(r, dest)
-	if v, ok := dict["peering_timebase"].(int64); ok {
+	// Unset optional values decode as -1, matching upstream None.
+	peer.PropagationStampCost = -1
+	peer.PropagationStampCostFlex = -1
+	peer.PeeringCost = -1
+	peer.PropagationTransferLimit = -1
+	peer.PropagationSyncLimit = -1
+	if v, ok := asInt64(dict["peering_timebase"]); ok {
 		peer.PeeringTimebase = v
 	}
 	if v, ok := dict["alive"].(bool); ok {
 		peer.Alive = v
 	}
-	if v, ok := dict["last_heard"].(float64); ok {
-		peer.LastHeard = v
+	if v := dict["last_heard"]; v != nil {
+		peer.LastHeard = asFloat(v)
 	}
-	if v, ok := dict["peering_key"].([]byte); ok {
+	// Upstream stores the peering key as a [key, value] list. Older Go
+	// peers stored the key bytes alone, so both forms are accepted.
+	switch v := dict["peering_key"].(type) {
+	case []byte:
 		peer.PeeringKey = v
+	case []any:
+		if len(v) == 2 {
+			if key, ok := v[0].([]byte); ok {
+				peer.PeeringKey = key
+			}
+			if val, ok := asInt64(v[1]); ok {
+				peer.PeeringValue = int(val)
+			}
+		}
 	}
 	if v, ok := dict["metadata"].(map[any]any); ok {
 		peer.Metadata = mapAnyToByteKey(v)
 	}
-	if v, ok := dict["propagation_stamp_cost"].(int64); ok {
+	if v, ok := dict["sync_strategy"].(int64); ok {
+		peer.SyncStrategy = byte(v)
+	}
+	if v, ok := asInt64(dict["propagation_stamp_cost"]); ok {
 		peer.PropagationStampCost = int(v)
 	}
-	if v, ok := dict["propagation_stamp_cost_flexibility"].(int64); ok {
+	if v, ok := asInt64(dict["propagation_stamp_cost_flexibility"]); ok {
 		peer.PropagationStampCostFlex = int(v)
 	}
-	if v, ok := dict["peering_cost"].(int64); ok {
+	if v, ok := asInt64(dict["peering_cost"]); ok {
 		peer.PeeringCost = int(v)
 	}
-	if v, ok := dict["propagation_transfer_limit"].(float64); ok {
-		peer.PropagationTransferLimit = v
+	// Upstream coerces the limit fields with float()/int() and treats
+	// unparseable values as unset.
+	if f, ok := numericField(dict["propagation_transfer_limit"]); ok {
+		peer.PropagationTransferLimit = f
 	}
-	if v, ok := dict["propagation_sync_limit"].(float64); ok {
-		peer.PropagationSyncLimit = v
+	if f, ok := numericField(dict["propagation_sync_limit"]); ok {
+		peer.PropagationSyncLimit = f
+	}
+	// Upstream falls back to the transfer limit when the sync limit is
+	// missing or unparseable in the peer file.
+	if peer.PropagationSyncLimit < 0 {
+		peer.PropagationSyncLimit = peer.PropagationTransferLimit
+	}
+	if v := dict["link_establishment_rate"]; v != nil {
+		peer.LinkEstablishmentRate = asFloat(v)
+	}
+	if v := dict["sync_transfer_rate"]; v != nil {
+		peer.SyncTransferRate = asFloat(v)
+	}
+	if v := dict["last_sync_attempt"]; v != nil {
+		peer.LastSyncAttempt = asFloat(v)
+	}
+	if v, ok := asInt64(dict["offered"]); ok {
+		peer.Offered = v
+	}
+	if v, ok := asInt64(dict["outgoing"]); ok {
+		peer.Outgoing = v
+	}
+	if v, ok := asInt64(dict["incoming"]); ok {
+		peer.Incoming = v
+	}
+	if v, ok := asInt64(dict["rx_bytes"]); ok {
+		peer.RXBytes = v
+	}
+	if v, ok := asInt64(dict["tx_bytes"]); ok {
+		peer.TXBytes = v
+	}
+	if r.store != nil {
+		for _, tid := range decodeByteList(dict["handled_ids"]) {
+			r.store.markHandled(tid, peer.DestinationHash)
+		}
+		for _, tid := range decodeByteList(dict["unhandled_ids"]) {
+			r.store.addUnhandledPeer(tid, peer.DestinationHash)
+		}
 	}
 	return peer, nil
 }
@@ -412,15 +615,15 @@ func (p *Peer) toBytes() ([]byte, error) {
 		"alive":                              p.Alive,
 		"last_heard":                         p.LastHeard,
 		"sync_strategy":                      p.SyncStrategy,
-		"peering_key":                        p.PeeringKey,
+		"peering_key":                        nil,
 		"metadata":                           p.Metadata,
 		"link_establishment_rate":            p.LinkEstablishmentRate,
 		"sync_transfer_rate":                 p.SyncTransferRate,
-		"propagation_transfer_limit":         p.PropagationTransferLimit,
-		"propagation_sync_limit":             p.PropagationSyncLimit,
-		"propagation_stamp_cost":             p.PropagationStampCost,
-		"propagation_stamp_cost_flexibility": p.PropagationStampCostFlex,
-		"peering_cost":                       p.PeeringCost,
+		"propagation_transfer_limit":         nil,
+		"propagation_sync_limit":             nil,
+		"propagation_stamp_cost":             nil,
+		"propagation_stamp_cost_flexibility": nil,
+		"peering_cost":                       nil,
 		"last_sync_attempt":                  p.LastSyncAttempt,
 		"offered":                            p.Offered,
 		"outgoing":                           p.Outgoing,
@@ -429,6 +632,45 @@ func (p *Peer) toBytes() ([]byte, error) {
 		"tx_bytes":                           p.TXBytes,
 		"handled_ids":                        []any{},
 		"unhandled_ids":                      []any{},
+	}
+	// Upstream stores the peering key as a [key, value] list and unset
+	// limits and costs as None, so nil is written for unset values.
+	if p.PeeringKey != nil {
+		dict["peering_key"] = []any{p.PeeringKey, p.PeeringValue}
+	}
+	if p.PropagationTransferLimit >= 0 {
+		dict["propagation_transfer_limit"] = p.PropagationTransferLimit
+	}
+	if p.PropagationSyncLimit >= 0 {
+		dict["propagation_sync_limit"] = p.PropagationSyncLimit
+	}
+	if p.PropagationStampCost >= 0 {
+		dict["propagation_stamp_cost"] = p.PropagationStampCost
+	}
+	if p.PropagationStampCostFlex >= 0 {
+		dict["propagation_stamp_cost_flexibility"] = p.PropagationStampCostFlex
+	}
+	if p.PeeringCost >= 0 {
+		dict["peering_cost"] = p.PeeringCost
+	}
+	if p.router != nil && p.router.store != nil {
+		pk := peerKey(p.DestinationHash)
+		handled := make([]any, 0)
+		unhandled := make([]any, 0)
+		for key, ent := range p.router.store.entriesSnapshot() {
+			tid, err := hex.DecodeString(key)
+			if err != nil {
+				continue
+			}
+			if slices.Contains(ent.HandledPeers, pk) {
+				handled = append(handled, tid)
+			}
+			if slices.Contains(ent.UnhandledPeers, pk) {
+				unhandled = append(unhandled, tid)
+			}
+		}
+		dict["handled_ids"] = handled
+		dict["unhandled_ids"] = unhandled
 	}
 	return msgpack.Marshal(dict)
 }
@@ -446,10 +688,19 @@ func (r *Router) peer(destHash []byte, timebase int64, transferLimit, syncLimit 
 		return
 	}
 	if peeringCost > r.cfg.Propagation.RemotePeeringCostMax {
-		if _, ok := r.peers[peerKey(destHash)]; ok {
+		r.peersMu.RLock()
+		_, isPeer := r.peers[peerKey(destHash)]
+		r.peersMu.RUnlock()
+		if isPeer {
 			r.unpeer(destHash, timebase)
 		}
 		return
+	}
+
+	// Upstream falls back to the transfer limit when no sync limit is
+	// known, so a max size transfer always fits in one sync.
+	if syncLimit < 0 {
+		syncLimit = transferLimit
 	}
 
 	key := peerKey(destHash)
@@ -560,15 +811,21 @@ func (r *Router) unpeer(destHash []byte, timestamp int64) {
 }
 
 func (r *Router) peerFromStatic(destHash []byte) {
-	r.peer(destHash, time.Now().Unix(),
-		r.cfg.Propagation.PropagationTransferMaxAcceptedKB,
-		r.cfg.Propagation.PropagationSyncMaxAcceptedKB,
-		r.cfg.Propagation.PropagationStampCostTarget,
-		r.cfg.Propagation.PropagationStampCostFlexibility,
-		r.cfg.Propagation.PeeringCost,
-		nil,
-	)
+	// Upstream seeds static peers directly with an empty timebase and
+	// requests a path so the first announce can update the peering
+	// config even when it arrives as a path response.
+	r.peersMu.Lock()
+	if _, ok := r.peers[peerKey(destHash)]; !ok {
+		r.peers[peerKey(destHash)] = newPeer(r, destHash)
+	}
+	r.peersMu.Unlock()
+	if r.transport != nil {
+		_ = r.transport.RequestPath(destHash, "", nil, false)
+	}
 }
+
+// fastestPeerPoolSize matches upstream LXMRouter.FASTEST_N_RANDOM_POOL.
+const fastestPeerPoolSize = 2
 
 func (r *Router) syncPeers() {
 	r.peersMu.RLock()
@@ -578,16 +835,122 @@ func (r *Router) syncPeers() {
 	}
 	r.peersMu.RUnlock()
 
+	var waiting, unresponsive []*Peer
 	for _, peer := range peers {
-		if peer.State != PeerStateIdle {
-			continue
-		}
 		if time.Now().Unix() > int64(peer.LastHeard)+peerMaxUnreachable && !r.isStaticPeer(peer.DestinationHash) {
 			r.unpeer(peer.DestinationHash, 0)
 			continue
 		}
-		if peer.needsSync(r) {
-			go peer.sync()
+		if peer.State != PeerStateIdle || peer.UnhandledCount(r) == 0 {
+			continue
+		}
+		if peer.Alive {
+			waiting = append(waiting, peer)
+		} else if float64(time.Now().Unix()) > peer.NextSyncAttempt {
+			unresponsive = append(unresponsive, peer)
+		}
+	}
+
+	// Upstream syncs a single peer per round, selected randomly from a
+	// pool of the fastest known alive peers plus an equal number of
+	// peers with unknown sync speed. Unresponsive peers past their
+	// next sync attempt are only tried when no alive peer is waiting.
+	var pool []*Peer
+	if len(waiting) > 0 {
+		sort.Slice(waiting, func(i, j int) bool {
+			return waiting[i].SyncTransferRate > waiting[j].SyncTransferRate
+		})
+		fastest := waiting[:min(len(waiting), fastestPeerPoolSize)]
+		pool = append(pool, fastest...)
+		unknowns := 0
+		for _, p := range waiting {
+			if p.SyncTransferRate == 0 && unknowns < len(fastest) {
+				pool = append(pool, p)
+				unknowns++
+			}
+		}
+	} else {
+		pool = unresponsive
+	}
+	if len(pool) > 0 {
+		go pool[rand.IntN(len(pool))].sync() // #nosec G404 -- non-cryptographic peer selection
+	}
+}
+
+// rotatePeers drops low acceptance rate peers when the peer count
+// approaches max_peers, matching upstream LXMRouter.rotate_peers.
+func (r *Router) rotatePeers() {
+	maxPeers := r.cfg.Propagation.MaxPeers
+	if maxPeers <= 0 {
+		return
+	}
+	// Upstream ROTATION_HEADROOM_PCT is 10.
+	headroom := max(1, maxPeers*10/100)
+
+	r.peersMu.RLock()
+	peerCount := len(r.peers)
+	required := peerCount - (maxPeers - headroom)
+	if required <= 0 || peerCount-required <= 1 {
+		r.peersMu.RUnlock()
+		return
+	}
+	untested := 0
+	pool := make([]*Peer, 0, peerCount)
+	for _, p := range r.peers {
+		pool = append(pool, p)
+		if p.LastSyncAttempt == 0 {
+			untested++
+		}
+	}
+	r.peersMu.RUnlock()
+
+	if untested >= headroom {
+		// Newly added peers have not been tested yet, postpone rotation.
+		return
+	}
+
+	// Fully synced peers are preferred as the rotation pool basis.
+	var fullySynced []*Peer
+	for _, p := range pool {
+		if p.UnhandledCount(r) == 0 {
+			fullySynced = append(fullySynced, p)
+		}
+	}
+	if len(fullySynced) > 0 {
+		pool = fullySynced
+	}
+
+	var waiting, unresponsive []*Peer
+	for _, p := range pool {
+		if r.isStaticPeer(p.DestinationHash) || p.State != PeerStateIdle {
+			continue
+		}
+		if p.Alive {
+			// Peers are not considered for unpeering until at least one
+			// message has been offered to them.
+			if p.Offered > 0 {
+				waiting = append(waiting, p)
+			}
+		} else {
+			unresponsive = append(unresponsive, p)
+		}
+	}
+
+	// Upstream prioritise_rotating_unreachable_peers is false, so the
+	// drop pool always contains both unresponsive and waiting peers.
+	dropPool := append(unresponsive, waiting...)
+	if len(dropPool) == 0 {
+		return
+	}
+	sort.Slice(dropPool, func(i, j int) bool {
+		return dropPool[i].AcceptanceRate() < dropPool[j].AcceptanceRate()
+	})
+	drops := min(required, len(dropPool))
+	for _, p := range dropPool[:drops] {
+		// Upstream ROTATION_AR_MAX is 0.5.
+		if p.AcceptanceRate() < 0.5 {
+			Debug("dropping low acceptance rate peer", "peer", peerKey(p.DestinationHash), "acceptance_rate", p.AcceptanceRate())
+			r.unpeer(p.DestinationHash, 0)
 		}
 	}
 }

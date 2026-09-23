@@ -1171,6 +1171,12 @@ func (t *Transport) notifyAnnounceHandlersFiltered(destHash []byte, identity any
 		if isPathResponse && !handler.ReceivePathResponses() {
 			continue
 		}
+		if ext, ok := handler.(announce.PathAwareHandler); ok {
+			if err := ext.ReceivedAnnouncePathResponse(destHash, identity, appData, hops, isPathResponse); err != nil {
+				debug.Log(debug.DebugError, "Error in announce handler", "error", err)
+			}
+			continue
+		}
 		if err := handler.ReceivedAnnounce(destHash, identity, appData, hops); err != nil {
 			debug.Log(debug.DebugError, "Error in announce handler", "error", err)
 		}

@@ -28,6 +28,7 @@ type LXMFConfig struct {
 	AnnounceAtStart                 bool
 	AnnounceIntervalMinutes         int
 	DeliveryTransferMaxAcceptedSize float64
+	StampCost                       int
 	OnInbound                       string
 }
 
@@ -53,6 +54,9 @@ type PropagationConfig struct {
 	StaticPeers                      []string
 	MaxPeers                         int
 	FromStaticOnly                   bool
+	MaxInboundSyncs                  int
+	SequentialPNStampValidation      bool
+	StaticPeersBypassSequential      bool
 }
 
 // LoggingConfig is the [logging] section.
@@ -68,6 +72,7 @@ func DefaultConfig() Config {
 			AnnounceAtStart:                 false,
 			AnnounceIntervalMinutes:         0,
 			DeliveryTransferMaxAcceptedSize: 1000,
+			StampCost:                       12,
 		},
 		Propagation: PropagationConfig{
 			EnableNode:                       false,
@@ -75,7 +80,7 @@ func DefaultConfig() Config {
 			AnnounceAtStart:                  true,
 			AnnounceIntervalMinutes:          360,
 			Autopeer:                         true,
-			AutopeerMaxDepth:                 6,
+			AutopeerMaxDepth:                 4,
 			MessageStorageLimitMB:            500,
 			PropagationTransferMaxAcceptedKB: 256,
 			PropagationMessageMaxAcceptedKB:  256,
@@ -86,6 +91,9 @@ func DefaultConfig() Config {
 			RemotePeeringCostMax:             26,
 			MaxPeers:                         20,
 			FromStaticOnly:                   false,
+			MaxInboundSyncs:                  3,
+			SequentialPNStampValidation:      true,
+			StaticPeersBypassSequential:      true,
 		},
 		Logging: LoggingConfig{
 			Level: LogInfo,
@@ -126,6 +134,9 @@ func ParseConfig(r io.Reader) (Config, error) {
 			if cfg.LXMF.DeliveryTransferMaxAcceptedSize < 0.38 {
 				cfg.LXMF.DeliveryTransferMaxAcceptedSize = 0.38
 			}
+		}
+		if v, ok := section["stamp_cost"]; ok {
+			cfg.LXMF.StampCost = max(parseInt(v), 1)
 		}
 		if v, ok := section["on_inbound"]; ok {
 			cfg.LXMF.OnInbound = v
@@ -205,6 +216,15 @@ func ParseConfig(r io.Reader) (Config, error) {
 		if v, ok := section["from_static_only"]; ok {
 			cfg.Propagation.FromStaticOnly = parseBool(v)
 		}
+		if v, ok := section["max_inbound_syncs"]; ok {
+			cfg.Propagation.MaxInboundSyncs = max(parseInt(v), 1)
+		}
+		if v, ok := section["sequential_pn_stamp_validation"]; ok {
+			cfg.Propagation.SequentialPNStampValidation = parseBool(v)
+		}
+		if v, ok := section["static_peers_bypass_sequential"]; ok {
+			cfg.Propagation.StaticPeersBypassSequential = parseBool(v)
+		}
 	}
 
 	if section, ok := sections["logging"]; ok {
@@ -244,6 +264,7 @@ func WriteConfig(cfg Config, w io.Writer) error {
 		{"announce_at_start", boolStr(cfg.LXMF.AnnounceAtStart)},
 		{"announce_interval", strconv.Itoa(cfg.LXMF.AnnounceIntervalMinutes)},
 		{"delivery_transfer_max_accepted_size", floatStr(cfg.LXMF.DeliveryTransferMaxAcceptedSize)},
+		{"stamp_cost", strconv.Itoa(cfg.LXMF.StampCost)},
 		{"on_inbound", cfg.LXMF.OnInbound},
 	})
 	emitSection("propagation", []kvPair{
@@ -267,6 +288,9 @@ func WriteConfig(cfg Config, w io.Writer) error {
 		{"static_peers", strings.Join(cfg.Propagation.StaticPeers, ", ")},
 		{"max_peers", strconv.Itoa(cfg.Propagation.MaxPeers)},
 		{"from_static_only", boolStr(cfg.Propagation.FromStaticOnly)},
+		{"max_inbound_syncs", strconv.Itoa(cfg.Propagation.MaxInboundSyncs)},
+		{"sequential_pn_stamp_validation", boolStr(cfg.Propagation.SequentialPNStampValidation)},
+		{"static_peers_bypass_sequential", boolStr(cfg.Propagation.StaticPeersBypassSequential)},
 	})
 	emitSection("logging", []kvPair{
 		{"loglevel", strconv.Itoa(cfg.Logging.Level)},
@@ -481,7 +505,7 @@ announce_at_start = yes
 autopeer = yes
 
 # Maximum hop depth for automatically peered nodes.
-autopeer_maxdepth = 6
+autopeer_maxdepth = 4
 
 # Maximum disk usage for the propagation message store, in megabytes.
 # message_storage_limit = 500
@@ -491,6 +515,9 @@ autopeer_maxdepth = 6
 
 # Maximum accepted size of a single inbound propagation node sync, in KB.
 # propagation_sync_max_accepted_size = 10240
+
+# Maximum number of simultaneous inbound peer sync transfers.
+# max_inbound_syncs = 3
 
 # Target stamp cost required to deliver messages via this node.
 # propagation_stamp_cost_target = 16
@@ -533,6 +560,10 @@ announce_at_start = no
 
 # Maximum unpacked size of inbound delivery messages, in kilobytes.
 delivery_transfer_max_accepted_size = 1000
+
+# Stamp cost required for inbound messages, advertised in delivery
+# announces so senders can generate a valid stamp.
+# stamp_cost = 12
 
 # Optional command executed for every received message. The full path of
 # the saved message file is appended as a single quoted argument.

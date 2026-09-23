@@ -70,7 +70,7 @@ func TestValidatePNStampsBatch(t *testing.T) {
 }
 
 func TestEncodePNAnnounceAppDataRoundTrip(t *testing.T) {
-	raw, err := EncodePNAnnounceAppData(1700000000, 256, 10240, 16, 3, 18, "node-a")
+	raw, err := EncodePNAnnounceAppData(1700000000, true, 256, 10240, 16, 3, 18, "node-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,8 @@ func TestPropagationControlStatsHandler(t *testing.T) {
 	}
 
 	denied := mesh.recvRouter.statsGetRequestHandler("", nil, nil, nil, nil, 0)
-	if code, ok := denied.([]byte); !ok || len(code) != 1 || code[0] != PeerErrorNoIdentity {
+	// Upstream returns bare integer error codes on the wire.
+	if code, ok := asInt64(denied); !ok || code != int64(PeerErrorNoIdentity) {
 		t.Fatalf("expected no identity error, got %T %v", denied, denied)
 	}
 }

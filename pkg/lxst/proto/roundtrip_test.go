@@ -10,7 +10,7 @@ import (
 	"github.com/Quad4-Software/reticulum-go-protocols/pkg/lxst/proto"
 )
 
-func TestPropertySignallingRoundTrip(t *testing.T) {
+func TestPackSignallingRoundTrip(t *testing.T) {
 	gen := pbt.SliceOf(pbt.IntRange(0, 400), 1, 8)
 	pbt.Check(t, pbt.ForAll("signalling round trip", gen, func(signals []int) bool {
 		raw, err := proto.PackSignalling(signals)
@@ -33,7 +33,7 @@ func TestPropertySignallingRoundTrip(t *testing.T) {
 	}), pbt.WithRuns(200))
 }
 
-func TestPropertyFrameRoundTrip(t *testing.T) {
+func TestPackFrameRoundTrip(t *testing.T) {
 	gen := pbt.NewGenerator("payload", func(r *rand.Rand, _ int) []byte {
 		n := r.Intn(48)
 		b := make([]byte, n)
@@ -60,7 +60,7 @@ func TestPropertyFrameRoundTrip(t *testing.T) {
 	}), pbt.WithRuns(200))
 }
 
-func TestPropertyTelephonyHashLen(t *testing.T) {
+func TestTelephonyHashLength(t *testing.T) {
 	gen := pbt.NewGenerator("idhash", func(r *rand.Rand, _ int) []byte {
 		b := make([]byte, 16)
 		_, _ = r.Read(b)

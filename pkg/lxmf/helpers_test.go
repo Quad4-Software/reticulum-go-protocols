@@ -83,6 +83,24 @@ func TestEncodeAnnounceAppData_Legacy(t *testing.T) {
 	}
 }
 
+func TestEncodeAnnounceAppDataWithIcon(t *testing.T) {
+	raw, err := EncodeAnnounceAppDataWithIcon("alice", 8, "hiking", []byte{0xff, 0xff, 0x00}, []byte{0x00, 0x00, 0xff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cost, ok, err := StampCostFromAppData(raw)
+	if err != nil || !ok || cost != 8 {
+		t.Fatalf("cost=%d ok=%v err=%v", cost, ok, err)
+	}
+	arr, err := unmarshalMsgpackArray(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arr) != 3 {
+		t.Fatalf("len=%d want 3", len(arr))
+	}
+}
+
 func TestEncodeAnnounceAppDataV5_OmitsCost(t *testing.T) {
 	encoded, err := EncodeAnnounceAppDataV5("dave", -1)
 	if err != nil {

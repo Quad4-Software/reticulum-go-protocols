@@ -9,14 +9,14 @@ func (r *Router) statsGetRequestHandler(path string, data []byte, requestID, lin
 	_ = path
 	_ = data
 	_ = requestID
-	_ = linkID
 	_ = requestedAt
 
+	remoteIdentity = r.requestRemoteIdentity(linkID, remoteIdentity)
 	if remoteIdentity == nil {
-		return []byte{PeerErrorNoIdentity}
+		return int(PeerErrorNoIdentity)
 	}
 	if !r.controlAllowed(remoteIdentity.Hash()) {
-		return []byte{PeerErrorNoAccess}
+		return int(PeerErrorNoAccess)
 	}
 	return r.compileStats()
 }
@@ -24,23 +24,23 @@ func (r *Router) statsGetRequestHandler(path string, data []byte, requestID, lin
 func (r *Router) peerSyncRequestHandler(path string, data []byte, requestID, linkID []byte, remoteIdentity *identity.Identity, requestedAt int64) any {
 	_ = path
 	_ = requestID
-	_ = linkID
 	_ = requestedAt
 
+	remoteIdentity = r.requestRemoteIdentity(linkID, remoteIdentity)
 	if remoteIdentity == nil {
-		return []byte{PeerErrorNoIdentity}
+		return int(PeerErrorNoIdentity)
 	}
 	if !r.controlAllowed(remoteIdentity.Hash()) {
-		return []byte{PeerErrorNoAccess}
+		return int(PeerErrorNoAccess)
 	}
 	if len(data) != DestinationLength {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 	r.peersMu.RLock()
 	peer, ok := r.peers[peerKey(data)]
 	r.peersMu.RUnlock()
 	if !ok {
-		return []byte{PeerErrorNotFound}
+		return int(PeerErrorNotFound)
 	}
 	go peer.sync()
 	return true
@@ -49,23 +49,23 @@ func (r *Router) peerSyncRequestHandler(path string, data []byte, requestID, lin
 func (r *Router) peerUnpeerRequestHandler(path string, data []byte, requestID, linkID []byte, remoteIdentity *identity.Identity, requestedAt int64) any {
 	_ = path
 	_ = requestID
-	_ = linkID
 	_ = requestedAt
 
+	remoteIdentity = r.requestRemoteIdentity(linkID, remoteIdentity)
 	if remoteIdentity == nil {
-		return []byte{PeerErrorNoIdentity}
+		return int(PeerErrorNoIdentity)
 	}
 	if !r.controlAllowed(remoteIdentity.Hash()) {
-		return []byte{PeerErrorNoAccess}
+		return int(PeerErrorNoAccess)
 	}
 	if len(data) != DestinationLength {
-		return []byte{PeerErrorInvalidData}
+		return int(PeerErrorInvalidData)
 	}
 	r.peersMu.RLock()
 	_, ok := r.peers[peerKey(data)]
 	r.peersMu.RUnlock()
 	if !ok {
-		return []byte{PeerErrorNotFound}
+		return int(PeerErrorNotFound)
 	}
 	r.unpeer(data, 0)
 	return true

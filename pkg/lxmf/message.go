@@ -53,6 +53,10 @@ type LXMessage struct {
 	IncludeTicket bool
 	// OutboundTicket is the optional 16-byte ticket for stamp short-circuit.
 	OutboundTicket []byte
+	// StampCost is the required delivery stamp cost. Nil means unset,
+	// matching upstream lxm.stamp_cost None; the messenger auto-fills
+	// it from announced stamp costs before sending.
+	StampCost *int
 	// StampValue is the PoW score or StampValueTicket after ValidateStamp.
 	StampValue int
 	// StampValid reflects the last ValidateStamp outcome.

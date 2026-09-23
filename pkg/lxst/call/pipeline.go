@@ -220,7 +220,12 @@ func (c *Call) sendMediaTick(bufs *pcmScratch) {
 	c.mutex.Unlock()
 	n := copy(bufs.pending, bufs.pending[want:])
 	bufs.pending = bufs.pending[:n]
-	if err != nil || len(encoded) == 0 {
+	if err != nil {
+		// LXST 0.5.3 Sources.py: encode errors are logged and the frame dropped.
+		debug.Log(debug.DebugTrace, "lxst encode error", "error", err)
+		return
+	}
+	if len(encoded) == 0 {
 		return
 	}
 	wire, err := proto.PackFrameInto(bufs.wire[:0], params.Codec, encoded)

@@ -74,3 +74,6 @@ third_party/miniaudio-src/
 # Python interop test virtualenv
 pkg/lxmf/interoptest/.venv/
 pkg/rrc/interoptest/.venv/
+
+# Extracted system libraries for local LXST native tests
+third_party/syslibs/

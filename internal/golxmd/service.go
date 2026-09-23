@@ -102,7 +102,12 @@ func (s *Service) Start() error {
 	}
 	s.router = router
 
-	if _, err := router.RegisterDelivery(s.lxmfCfg.LXMF.DisplayName, nil); err != nil {
+	stampCost := s.lxmfCfg.LXMF.StampCost
+	var stampCostPtr *int
+	if stampCost > 0 {
+		stampCostPtr = &stampCost
+	}
+	if _, err := router.RegisterDelivery(s.lxmfCfg.LXMF.DisplayName, stampCostPtr); err != nil {
 		return fmt.Errorf("register delivery: %w", err)
 	}
 
@@ -253,8 +258,15 @@ func (s *Service) announceDeliveryOnce() {
 	if dest == nil {
 		return
 	}
-	appData, err := lxmf.EncodeAnnounceAppDataV5(s.lxmfCfg.LXMF.DisplayName, -1)
-	if err == nil {
+	// Upstream announces [display_name, stamp_cost, [SF_COMPRESSION]]
+	// where the cost is included only when 0 < cost < 255.
+	announceCost := int64(-1)
+	if c := s.lxmfCfg.LXMF.StampCost; c > 0 && c < 255 {
+		announceCost = int64(c)
+	}
+	if appData, err := lxmf.EncodeAnnounceAppDataV5WithFeatures(
+		s.lxmfCfg.LXMF.DisplayName, announceCost, []byte{lxmf.SFCompression},
+	); err == nil {
 		dest.SetDefaultAppData(appData)
 	}
 	if err := dest.Announce(false, nil, nil); err != nil {
@@ -278,12 +290,10 @@ func (s *Service) announcePropagationOnce() {
 	}
 	transfer := int(s.lxmfCfg.Propagation.PropagationTransferMaxAcceptedKB)
 	syncLimit := int(s.lxmfCfg.Propagation.PropagationSyncMaxAcceptedKB)
-	isPN := !s.lxmfCfg.Propagation.FromStaticOnly
-	if !isPN {
-		transfer = 0
-	}
+	nodeState := !s.lxmfCfg.Propagation.FromStaticOnly
 	appData, err := lxmf.EncodePNAnnounceAppData(
 		time.Now().Unix(),
+		nodeState,
 		transfer,
 		syncLimit,
 		s.lxmfCfg.Propagation.PropagationStampCostTarget,

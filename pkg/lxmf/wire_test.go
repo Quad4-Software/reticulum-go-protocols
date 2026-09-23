@@ -9,7 +9,7 @@ import (
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
 )
 
-func TestProperty_PackUnpackRoundTrip(t *testing.T) {
+func TestPackUnpack_RoundTripRandomized(t *testing.T) {
 	src := mustNewIdentity(t)
 	dst := mustNewIdentity(t)
 	identity.Remember(nil, src.Hash(), src.GetPublicKey(), nil)
@@ -38,7 +38,7 @@ func TestProperty_PackUnpackRoundTrip(t *testing.T) {
 	}
 }
 
-func TestProperty_PaperURIRoundTrip(t *testing.T) {
+func TestPaperURI_RoundTripRandomized(t *testing.T) {
 	f := func(n uint16) bool {
 		size := int(n % uint16(PaperMDU))
 		if size == 0 {
@@ -60,7 +60,7 @@ func TestProperty_PaperURIRoundTrip(t *testing.T) {
 	}
 }
 
-func TestProperty_HexHashIdempotentForm(t *testing.T) {
+func TestHexHash_LengthMatchesInput(t *testing.T) {
 	f := func(b []byte) bool {
 		if len(b) > 64 {
 			b = b[:64]
@@ -76,7 +76,7 @@ func TestProperty_HexHashIdempotentForm(t *testing.T) {
 	}
 }
 
-func TestProperty_MessageStoreFilenameRoundTrip(t *testing.T) {
+func TestMessageStoreFilename_RoundTripRandomized(t *testing.T) {
 	f := func(n byte, received uint16, stamp int8) bool {
 		id := bytes.Repeat([]byte{n}, 8+int(n%8))
 		name := MessageStoreFilename(id, float64(received), int64(stamp))
@@ -91,7 +91,7 @@ func TestProperty_MessageStoreFilenameRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOracle_PackUnpackStable(t *testing.T) {
+func TestPackUnpack_RepackStable(t *testing.T) {
 	src := mustNewIdentity(t)
 	dst := mustNewIdentity(t)
 	identity.Remember(nil, src.Hash(), src.GetPublicKey(), nil)
@@ -124,12 +124,12 @@ func TestOracle_PackUnpackStable(t *testing.T) {
 			t.Fatal(err)
 		}
 		if end.TitleString() != tc.title || end.ContentString() != tc.content {
-			t.Fatalf("oracle drift: %+v", tc)
+			t.Fatalf("repack drift: %+v", tc)
 		}
 	}
 }
 
-func TestOracle_LayoutPrefixes(t *testing.T) {
+func TestPack_DestinationSourcePrefixes(t *testing.T) {
 	src := mustNewIdentity(t)
 	dst := mustNewIdentity(t)
 	msg, err := NewMessage(dst.Hash(), src.Hash(), []byte("a"), []byte("b"), nil)
@@ -138,17 +138,17 @@ func TestOracle_LayoutPrefixes(t *testing.T) {
 	}
 	raw := mustPack(t, msg, src)
 	if !bytes.Equal(raw[:DestinationLength], dst.Hash()) {
-		t.Fatal("destination prefix oracle")
+		t.Fatal("destination hash prefix mismatch")
 	}
 	if !bytes.Equal(raw[DestinationLength:2*DestinationLength], src.Hash()) {
-		t.Fatal("source prefix oracle")
+		t.Fatal("source hash prefix mismatch")
 	}
 	if len(raw) < Overhead {
 		t.Fatalf("len=%d < overhead=%d", len(raw), Overhead)
 	}
 }
 
-func TestOracle_AnnounceCostKeys(t *testing.T) {
+func TestStampCostFromAppData_ReadsV5Cost(t *testing.T) {
 	raw, err := EncodeAnnounceAppDataV5("hub", 12)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestOracle_AnnounceCostKeys(t *testing.T) {
 	t.Log("LXMF_ANNOUNCE_COST_PROVED")
 }
 
-func TestOracle_FieldConstantsMatchUpstream(t *testing.T) {
+func TestFieldConstants_MatchUpstream(t *testing.T) {
 	if FieldEmbeddedLXMs != 0x01 || FieldRenderer != 0x0F || FieldReplyTo != 0x30 || FieldReaction != 0x40 {
 		t.Fatal("core field ids")
 	}
@@ -182,7 +182,7 @@ func TestOracle_FieldConstantsMatchUpstream(t *testing.T) {
 	if PNMetaVersion != 0x00 || PNMetaUtilPressure != 0x05 || SFCompression != 0x00 {
 		t.Fatal("pn/sf keys")
 	}
-	if MethodPaper != 0x05 || URISchema != "lxm" || AppName != "lxmf" || Version != "1.1.0" {
+	if MethodPaper != 0x05 || URISchema != "lxm" || AppName != "lxmf" || Version != "1.1.1" {
 		t.Fatal("method/uri/version")
 	}
 	t.Log("LXMF_FIELD_CONSTANTS_PROVED")

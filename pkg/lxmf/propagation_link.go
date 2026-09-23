@@ -24,11 +24,14 @@ const (
 
 func (m *Messenger) clearPropagationLink() {
 	m.propLinkMu.Lock()
-	defer m.propLinkMu.Unlock()
-	if m.propLink != nil {
-		m.propLink.Teardown()
-		m.propLink = nil
-		m.propLinkNode = nil
+	lnk := m.propLink
+	m.propLink = nil
+	m.propLinkNode = nil
+	m.propLinkMu.Unlock()
+	if lnk != nil {
+		// Teardown invokes the closed callback synchronously, and the
+		// callback takes propLinkMu, so it cannot run under the lock.
+		lnk.Teardown()
 	}
 }
 
@@ -47,12 +50,13 @@ func (m *Messenger) ensurePropagationLink(propNodeHash []byte) (*link.Link, erro
 		Verbose("propagation reusing active link", "node", hex.EncodeToString(propNodeHash))
 		return lnk, nil
 	}
-	if m.propLink != nil {
-		m.propLink.Teardown()
-		m.propLink = nil
-		m.propLinkNode = nil
-	}
+	stale := m.propLink
+	m.propLink = nil
+	m.propLinkNode = nil
 	m.propLinkMu.Unlock()
+	if stale != nil {
+		stale.Teardown()
+	}
 
 	return m.establishPropagationLink(propNodeHash)
 }
@@ -167,22 +171,13 @@ func (m *Messenger) onPropagationSignalling(data []byte, _ *packet.Packet) {
 }
 
 func signalByte(v any) (byte, bool) {
-	switch x := v.(type) {
-	case byte:
-		return x, true
-	case int8:
-		if x < 0 {
-			return 0, false
-		}
-		return byte(x), true
-	case int:
-		if x < 0 || x > 255 {
-			return 0, false
-		}
-		return byte(x), true
-	default:
-		return 0, false
+	if b, ok := v.([]byte); ok && len(b) == 1 {
+		return b[0], true
 	}
+	if n, ok := asInt64(v); ok && n >= 0 && n <= 0xff {
+		return byte(n), true
+	}
+	return 0, false
 }
 
 func (m *Messenger) sendPropagationPayload(lnk *link.Link, payload []byte) error {

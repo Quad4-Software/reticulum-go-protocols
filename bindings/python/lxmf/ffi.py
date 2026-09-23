@@ -89,6 +89,13 @@ def _configure(lib: ctypes.CDLL) -> None:
         ctypes.POINTER(ctypes.c_size_t),
     ]
     lib.lxmf_message_pack.restype = ctypes.c_int
+    lib.lxmf_message_encrypted_payload.argtypes = [
+        ctypes.c_uint64,
+        ctypes.POINTER(ctypes.c_uint8),
+        ctypes.c_size_t,
+        ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.lxmf_message_encrypted_payload.restype = ctypes.c_int
     lib.lxmf_message_unpack.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
     lib.lxmf_message_unpack.restype = ctypes.c_uint64
     lib.lxmf_message_unpack_verified.argtypes = [

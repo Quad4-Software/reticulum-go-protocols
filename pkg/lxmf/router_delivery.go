@@ -57,6 +57,15 @@ func (r *Router) deliveryLinkEstablished(v any) {
 	lnk.SetResourceConcludedCallback(func(res any) {
 		r.deliveryResourceConcluded(res)
 	})
+	linkKey := hex.EncodeToString(lnk.GetLinkID())
+	r.linksMu.Lock()
+	r.directLinks[linkKey] = lnk
+	r.linksMu.Unlock()
+	lnk.SetLinkClosedCallback(func(closed *link.Link) {
+		r.linksMu.Lock()
+		delete(r.directLinks, linkKey)
+		r.linksMu.Unlock()
+	})
 }
 
 func (r *Router) deliveryResourceAdvertised(adv any) bool {
@@ -80,7 +89,7 @@ func (r *Router) deliveryResourceConcluded(res any) {
 	if len(data) == 0 {
 		return
 	}
-	r.handleDeliveryPayload(data, MethodDirect, true, false)
+	r.handleDeliveryPayload(data, MethodDirect, false, false)
 }
 
 func (r *Router) handleDeliveryPayload(lxmfData []byte, method byte, noStampEnforcement, allowDuplicate bool) {
@@ -111,6 +120,11 @@ func (r *Router) handleDeliveryPayload(lxmfData []byte, method byte, noStampEnfo
 	msg.Incoming = true
 	msg.Method = method
 
+	// Upstream remembers tickets carried in FIELD_TICKET before the
+	// ignored check so valid tickets are kept even when the source is
+	// subsequently ignored.
+	rememberTicketField(r.tickets, msg)
+
 	r.mu.RLock()
 	stampCost := r.inboundStampCost
 	enforce := r.enforceStamps
@@ -122,7 +136,7 @@ func (r *Router) handleDeliveryPayload(lxmfData []byte, method byte, noStampEnfo
 	}
 
 	if stampCost != nil && *stampCost > 0 {
-		ok, err := msg.ValidateStamp(*stampCost, nil)
+		ok, err := msg.ValidateStamp(*stampCost, r.tickets.inboundTickets(msg.SourceHash))
 		if err == nil {
 			msg.StampValid = ok
 		}

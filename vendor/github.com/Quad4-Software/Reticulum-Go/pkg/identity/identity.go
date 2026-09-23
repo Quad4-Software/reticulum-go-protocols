@@ -210,7 +210,7 @@ func (i *Identity) cachePublicHash() {
 	copy(i.fullPublicKey[32:], i.verificationKey)
 	sum := cryptography.Hash(i.fullPublicKey)
 	i.hash = append([]byte(nil), sum[:TruncatedHashLength/8]...)
-	i.hexHash = ""
+	i.hexHash = hex.EncodeToString(i.hash)
 }
 
 func (i *Identity) ensureRatchetMaps() {
@@ -871,7 +871,7 @@ func GetKnownDestination(hash string) ([]any, bool) {
 
 func (i *Identity) GetHexHash() string {
 	if i.hexHash == "" {
-		i.hexHash = hex.EncodeToString(i.Hash())
+		return hex.EncodeToString(i.Hash())
 	}
 	return i.hexHash
 }

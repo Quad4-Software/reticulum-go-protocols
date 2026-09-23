@@ -92,6 +92,10 @@ def message_pack(message: int, identity: int) -> bytes:
     return bytes(out[: written.value])
 
 
+def message_encrypted_payload(message: int) -> bytes:
+    return _read_variable_bytes(message, lib.lxmf_message_encrypted_payload, 65536)
+
+
 def message_unpack(data: bytes) -> int:
     arr = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
     handle = lib.lxmf_message_unpack(arr, len(data))

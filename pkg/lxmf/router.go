@@ -3,6 +3,7 @@ package lxmf
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/identity"
+	"github.com/Quad4-Software/Reticulum-Go/pkg/link"
 	"github.com/Quad4-Software/Reticulum-Go/pkg/transport"
 )
 
@@ -73,8 +75,18 @@ type Router struct {
 	peerDistributionQ    []peerDistEntry
 	propagationResources int
 
+	linksMu      sync.Mutex
+	directLinks  map[string]*link.Link
+	propLinks    map[string]*link.Link
+	controlLinks map[string]*link.Link
+
 	deliveryHandler *deliveryAnnounceHandler
 	propHandler     *propagationAnnounceHandler
+
+	// tickets and stampCosts mirror upstream available_tickets and
+	// outbound_stamp_costs, persisted under storagePath.
+	tickets    *ticketBook
+	stampCosts *stampCostBook
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -133,6 +145,11 @@ func NewRouter(id *identity.Identity, tr *transport.Transport, opts RouterOption
 		locallyProcessed:   make(map[string]float64),
 		validatedPeerLinks: make(map[string]bool),
 		acceptedOfferLinks: make(map[string]byte),
+		tickets:            newTicketBook(storagePath),
+		stampCosts:         newStampCostBook(storagePath),
+		directLinks:        make(map[string]*link.Link),
+		propLinks:          make(map[string]*link.Link),
+		controlLinks:       make(map[string]*link.Link),
 		validatingFrom:     make(map[string]float64),
 		throttledPeers:     make(map[string]float64),
 		stop:               make(chan struct{}),
@@ -194,7 +211,14 @@ func (r *Router) RegisterDelivery(displayName string, stampCost *int) (*destinat
 	if displayName == "" {
 		displayName = r.cfg.LXMF.DisplayName
 	}
-	appData, err := EncodeAnnounceAppDataV5(displayName, -1)
+	var nameElem, costElem any
+	if displayName != "" {
+		nameElem = []byte(displayName)
+	}
+	if stampCost != nil && *stampCost > 0 && *stampCost < 255 {
+		costElem = int64(*stampCost)
+	}
+	appData, err := marshalAnnounceAppData([]any{nameElem, costElem, []any{int64(SFCompression)}})
 	if err == nil {
 		dest.SetDefaultAppData(appData)
 	}
@@ -210,6 +234,13 @@ func (r *Router) RegisterDelivery(displayName string, stampCost *int) (*destinat
 
 // EnablePropagation activates the propagation node, message store, and peer sync handlers.
 func (r *Router) EnablePropagation() error {
+	// Upstream clamps the per-sync limit to at least the per-transfer
+	// limit so a single max size message always fits in one sync.
+	if r.cfg.Propagation.PropagationSyncMaxAcceptedKB <= 0 ||
+		r.cfg.Propagation.PropagationSyncMaxAcceptedKB < r.cfg.Propagation.PropagationTransferMaxAcceptedKB {
+		r.cfg.Propagation.PropagationSyncMaxAcceptedKB = r.cfg.Propagation.PropagationTransferMaxAcceptedKB
+	}
+
 	propDest, err := destination.New(r.identity, destination.In, destination.Single, AppName, r.transport, "propagation")
 	if err != nil {
 		return err
@@ -262,6 +293,22 @@ func (r *Router) EnablePropagation() error {
 		return err
 	}
 
+	controlDest.SetLinkEstablishedCallback(func(v any) {
+		lnk, ok := v.(*link.Link)
+		if !ok || lnk == nil {
+			return
+		}
+		key := hex.EncodeToString(lnk.GetLinkID())
+		r.linksMu.Lock()
+		r.controlLinks[key] = lnk
+		r.linksMu.Unlock()
+		lnk.SetLinkClosedCallback(func(closed *link.Link) {
+			r.linksMu.Lock()
+			delete(r.controlLinks, hex.EncodeToString(closed.GetLinkID()))
+			r.linksMu.Unlock()
+		})
+	})
+
 	r.mu.Lock()
 	r.propagationDest = propDest
 	r.controlDest = controlDest
@@ -270,6 +317,10 @@ func (r *Router) EnablePropagation() error {
 	r.propagationStart = time.Now()
 	r.cfg.Propagation.EnableNode = true
 	r.mu.Unlock()
+
+	// Peers persist per propagation node and require the message store
+	// for handled and unhandled message bookkeeping, so they load here.
+	r.loadPeers()
 
 	r.transport.RegisterDestination(controlDest.GetHash(), controlDest)
 
@@ -346,9 +397,14 @@ func (r *Router) AllowDestination(hash []byte) {
 	r.mu.Unlock()
 }
 
-// SetInboundStampCost sets the required inbound delivery stamp cost.
+// SetInboundStampCost sets the required inbound delivery stamp cost,
+// matching upstream set_inbound_stamp_cost: nil or a cost below 1
+// clears the requirement, costs must be below 255.
 func (r *Router) SetInboundStampCost(cost *int) {
 	r.mu.Lock()
+	if cost != nil && (*cost < 1 || *cost >= 255) {
+		cost = nil
+	}
 	r.inboundStampCost = cost
 	r.mu.Unlock()
 }
@@ -367,12 +423,12 @@ func (r *Router) propagationAnnounceAppData() ([]byte, error) {
 	}
 	transfer := int(r.cfg.Propagation.PropagationTransferMaxAcceptedKB)
 	syncLimit := int(r.cfg.Propagation.PropagationSyncMaxAcceptedKB)
-	isPN := !r.cfg.Propagation.FromStaticOnly
-	if !isPN {
-		transfer = 0
-	}
+	// Upstream announces node_state = propagation_node and not
+	// from_static_only. This only runs when the node is enabled.
+	nodeState := !r.cfg.Propagation.FromStaticOnly
 	return EncodePNAnnounceAppData(
 		time.Now().Unix(),
+		nodeState,
 		transfer,
 		syncLimit,
 		r.cfg.Propagation.PropagationStampCostTarget,
