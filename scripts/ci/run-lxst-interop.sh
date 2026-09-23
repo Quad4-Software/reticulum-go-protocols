@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run LXST Go/Python interop tests (requires pip lxst 0.5.1).
+# Run LXST Go/Python interop tests (requires pip lxst 0.5.3).
 set -eu
 
 ROOT="$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)"

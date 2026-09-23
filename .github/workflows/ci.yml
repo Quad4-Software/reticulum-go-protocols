@@ -43,7 +43,10 @@ env:
   CI_REVIVE_VERSION: "v1.15.0"
   CI_GOSEC_VERSION: "v2.29.0"
   CI_UV_VERSION: "0.11.32"
-  LXMF_REF_REV: "1.1.0"
+  LXMF_REF_REV: "1.1.1"
+  # lxmf 1.1.1 is a PyPI-only release (no upstream git tag); this pins the
+  # sdist fetched by scripts/ci/clone-refs.sh when the tag is absent.
+  LXMF_REF_PYPI_SHA256: "f2f7ea17d793fcc32cab826e81e8e9824404d025d1fc71b143be3242d45e6a5e"
   RRC_REF_REV: "f6d7e9d72bf83c70d7a9373ae8c5edaa052a7bf2"
   GOFLAGS: -mod=vendor
   GOPROXY: "off"
@@ -251,15 +254,19 @@ jobs:
 
       - name: Build gorrcd
         env:
+          BUILD_GOOS: ${{ matrix.goos }}
+          BUILD_GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarch == 'arm' && '6' || '' }}
           VERSION: dev
-        run: sh scripts/ci/build-gorrcd.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bin
+        run: sh scripts/ci/build-gorrcd.sh "$BUILD_GOOS" "$BUILD_GOARCH" bin
 
       - name: Build golxmd
         env:
+          BUILD_GOOS: ${{ matrix.goos }}
+          BUILD_GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarch == 'arm' && '6' || '' }}
           VERSION: dev
-        run: sh scripts/ci/build-golxmd.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bin
+        run: sh scripts/ci/build-golxmd.sh "$BUILD_GOOS" "$BUILD_GOARCH" bin
 
       - name: Verify workspace clean
         run: sh scripts/ci/verify-workspace-clean.sh
@@ -304,10 +311,12 @@ jobs:
 
       - name: Build and run --version
         env:
+          QEMU_GOARCH: ${{ matrix.goarch }}
+          QEMU_BIN: ${{ matrix.qemu }}
           GOARM: ${{ matrix.goarm || '' }}
         run: |
-          sh scripts/ci/qemu-gorrcd-smoke.sh "${{ matrix.goarch }}" "${{ matrix.qemu }}" bin
-          sh scripts/ci/qemu-golxmd-smoke.sh "${{ matrix.goarch }}" "${{ matrix.qemu }}" bin
+          sh scripts/ci/qemu-gorrcd-smoke.sh "$QEMU_GOARCH" "$QEMU_BIN" bin
+          sh scripts/ci/qemu-golxmd-smoke.sh "$QEMU_GOARCH" "$QEMU_BIN" bin
 
       - name: Verify workspace clean
         run: sh scripts/ci/verify-workspace-clean.sh
@@ -357,12 +366,6 @@ jobs:
             suite: interop-rrc
           - target: lxst
             suite: interop-lxst
-            extra_setup: |
-              sudo apt-get update -qq
-              sudo apt-get install -y cmake libcodec2-dev libopus-dev
-              python3 -m venv .venv-lxst
-              .venv-lxst/bin/pip install -U pip
-              .venv-lxst/bin/pip install "rns" "lxst==0.5.1" numpy pycodec2
             lxst_python: .venv-lxst/bin/python
     steps:
       - name: Harden runner
@@ -386,12 +389,18 @@ jobs:
         if: matrix.target != 'lxst'
         env:
           LXMF_REF_REV: ${{ env.LXMF_REF_REV }}
+          LXMF_REF_PYPI_SHA256: ${{ env.LXMF_REF_PYPI_SHA256 }}
           RRC_REF_REV: ${{ env.RRC_REF_REV }}
         run: sh scripts/ci/clone-refs.sh
 
       - name: LXST interop setup
-        if: matrix.extra_setup != ''
-        run: ${{ matrix.extra_setup }}
+        if: matrix.target == 'lxst'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake libcodec2-dev libopus-dev
+          python3 -m venv .venv-lxst
+          .venv-lxst/bin/pip install -U pip
+          .venv-lxst/bin/pip install "rns==1.5.4" "lxst==0.5.3" "numpy" "pycodec2"
 
       - name: Run interop
         env:
@@ -416,19 +425,11 @@ jobs:
       matrix:
         include:
           - lang: python
-            setup: ""
           - lang: rust
-            setup: ""
           - lang: java
-            setup: ""
           - lang: lua
-            setup: |
-              sudo apt-get update
-              sudo apt-get install -y luajit
           - lang: c
-            setup: ""
           - lang: cpp
-            setup: ""
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -443,11 +444,15 @@ jobs:
         run: sh scripts/ci/setup-ci-toolchain.sh
 
       - name: Setup language extras
-        if: matrix.setup != ''
-        run: ${{ matrix.setup }}
+        if: matrix.lang == 'lua'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y luajit
 
       - name: Run binding tests
-        run: sh scripts/ci/run-${{ matrix.lang }}-bindings.sh
+        env:
+          BINDING_LANG: ${{ matrix.lang }}
+        run: sh "scripts/ci/run-${BINDING_LANG}-bindings.sh"
 
       - name: Verify workspace clean
         run: sh scripts/ci/verify-workspace-clean.sh

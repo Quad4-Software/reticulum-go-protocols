@@ -82,6 +82,17 @@ interop)
 	task test:lxmf:interop
 	task test:rrc:interop
 	;;
+zizmor)
+	# Audit the GitHub Actions workflows (pedantic persona, fails on findings).
+	if command -v zizmor >/dev/null 2>&1; then
+		zizmor --persona pedantic .github/
+	elif command -v uvx >/dev/null 2>&1; then
+		uvx "zizmor==${CI_ZIZMOR_VERSION:-1.30.1}" --persona pedantic .github/
+	else
+		echo "run-suite: zizmor not found (install zizmor or uv)" >&2
+		exit 1
+	fi
+	;;
 *)
 	echo "run-suite: unknown suite: $SUITE" >&2
 	exit 1

@@ -88,15 +88,19 @@ jobs:
 
       - name: Build gorrcd
         env:
+          BUILD_GOOS: ${{ matrix.goos }}
+          BUILD_GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarch == 'arm' && '6' || '' }}
           VERSION: ${{ inputs.tag_name }}
-        run: sh scripts/ci/build-gorrcd.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bin
+        run: sh scripts/ci/build-gorrcd.sh "$BUILD_GOOS" "$BUILD_GOARCH" bin
 
       - name: Build golxmd
         env:
+          BUILD_GOOS: ${{ matrix.goos }}
+          BUILD_GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarch == 'arm' && '6' || '' }}
           VERSION: ${{ inputs.tag_name }}
-        run: sh scripts/ci/build-golxmd.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bin
+        run: sh scripts/ci/build-golxmd.sh "$BUILD_GOOS" "$BUILD_GOARCH" bin
 
       - name: Upload gorrcd artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -118,7 +122,7 @@ jobs:
     needs: [build]
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: write # create the GitHub release and upload assets
 
     steps:
       - name: Harden runner
