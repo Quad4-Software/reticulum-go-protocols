@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1056,14 +1057,14 @@ func TestAdversarial_BadPacketRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("adversarial mesh skipped in -short")
 	}
-	badCount := 0
+	var badCount atomic.Int32
 	m := newTestMesh(t, 43022, HubConfig{
 		Limits: HubLimits{RateLimitMsgsPerMinute: 60},
 		OnBadPacket: func(err error) {
 			if err == nil {
 				t.Error("nil bad packet error")
 			}
-			badCount++
+			badCount.Add(1)
 		},
 	})
 	c := dialMeshClient(t, m, 'A', ClientConfig{})
@@ -1071,7 +1072,7 @@ func TestAdversarial_BadPacketRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for badCount == 0 {
+	for badCount.Load() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("hub did not report bad packet")
 		}

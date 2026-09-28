@@ -23,7 +23,7 @@ type testMesh struct {
 	ifaces        []interfaces.Interface
 }
 
-func startTestUDP(t *testing.T, name, local, peer string, tr *transport.Transport) interfaces.Interface {
+func startTestUDP(t testing.TB, name, local, peer string, tr *transport.Transport) interfaces.Interface {
 	t.Helper()
 	var iface interfaces.Interface
 	var err error
@@ -43,7 +43,7 @@ func startTestUDP(t *testing.T, name, local, peer string, tr *transport.Transpor
 	return iface
 }
 
-func newTestMesh(t *testing.T, basePort int, hubCfg HubConfig) *testMesh {
+func newTestMesh(t testing.TB, basePort int, hubCfg HubConfig) *testMesh {
 	t.Helper()
 	cfgH := common.DefaultConfig()
 	cfgA := common.DefaultConfig()
@@ -126,7 +126,7 @@ func newTestMesh(t *testing.T, basePort int, hubCfg HubConfig) *testMesh {
 	return m
 }
 
-func dialMeshClient(t *testing.T, m *testMesh, which byte, cfg ClientConfig) *Client {
+func dialMeshClient(t testing.TB, m *testMesh, which byte, cfg ClientConfig) *Client {
 	t.Helper()
 	var tr *transport.Transport
 	var id *identity.Identity
@@ -146,7 +146,7 @@ func dialMeshClient(t *testing.T, m *testMesh, which byte, cfg ClientConfig) *Cl
 	return c
 }
 
-func waitJoined(t *testing.T, ch <-chan struct{}, label string) {
+func waitJoined(t testing.TB, ch <-chan struct{}, label string) {
 	t.Helper()
 	select {
 	case <-ch:
@@ -155,7 +155,7 @@ func waitJoined(t *testing.T, ch <-chan struct{}, label string) {
 	}
 }
 
-func mustEnvelope(t *testing.T, typ uint64, sender []byte) *Envelope {
+func mustEnvelope(t testing.TB, typ uint64, sender []byte) *Envelope {
 	t.Helper()
 	env, err := NewEnvelope(typ, sender)
 	if err != nil {
@@ -164,7 +164,7 @@ func mustEnvelope(t *testing.T, typ uint64, sender []byte) *Envelope {
 	return env
 }
 
-func dialMeshPreHello(t *testing.T, m *testMesh, which byte, onMsg MessageHandler) *session {
+func dialMeshPreHello(t testing.TB, m *testMesh, which byte, onMsg MessageHandler) *session {
 	t.Helper()
 	var tr *transport.Transport
 	var id *identity.Identity

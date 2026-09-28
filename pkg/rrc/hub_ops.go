@@ -18,9 +18,7 @@ func (h *Hub) reHello(p *hubPeer, env *Envelope) {
 		fake := &Envelope{Room: room, HasRoom: true}
 		h.onPart(p, fake)
 	}
-	h.mu.Lock()
-	p.active = false
-	h.mu.Unlock()
+	p.active.Store(false)
 	h.onHello(p, env)
 }
 
@@ -56,7 +54,7 @@ func (h *Hub) unindexNickLocked(id peerID, nick string) {
 
 func (h *Hub) peerLocked(hash []byte) *hubPeer {
 	p, ok := h.peers[peerKey(hash)]
-	if !ok || p == nil || !p.active {
+	if !ok || p == nil || !p.active.Load() {
 		return nil
 	}
 	return p
@@ -119,8 +117,15 @@ func (h *Hub) BroadcastNotice(room, text string) {
 	h.mu.Lock()
 	peers := h.roomPeersLocked(room, peerID{})
 	h.mu.Unlock()
+	if len(peers) == 0 {
+		return
+	}
+	raw, err := marshalType(h.sender, TypeNotice, room, text, "")
+	if err != nil {
+		return
+	}
 	for _, p := range peers {
-		_ = p.sess.sendType(TypeNotice, room, text, "")
+		_ = p.sess.sendRaw(raw)
 	}
 }
 
@@ -236,7 +241,7 @@ func (h *Hub) WelcomedCount() int {
 	defer h.mu.Unlock()
 	n := 0
 	for _, p := range h.peers {
-		if p.active {
+		if p.active.Load() {
 			n++
 		}
 	}
@@ -300,7 +305,7 @@ func (h *Hub) ActivePeerHashes() [][]byte {
 	defer h.mu.Unlock()
 	out := make([][]byte, 0, len(h.peers))
 	for _, p := range h.peers {
-		if p.active {
+		if p.active.Load() {
 			out = append(out, append([]byte(nil), p.peerHash...))
 		}
 	}

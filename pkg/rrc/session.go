@@ -54,23 +54,31 @@ func (s *session) sendEnvelope(env *Envelope) error {
 	if s == nil || s.lnk == nil {
 		return ErrSessionClosed
 	}
+	raw, err := env.Marshal()
+	if err != nil {
+		return err
+	}
+	return s.sendRaw(raw)
+}
+
+// sendRaw delivers already-marshaled bytes so broadcasts marshal once.
+func (s *session) sendRaw(raw []byte) error {
+	if s == nil || s.lnk == nil {
+		return ErrSessionClosed
+	}
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
 	if closed || !s.lnk.IsActive() {
 		return ErrLinkInactive
 	}
-	raw, err := env.Marshal()
-	if err != nil {
-		return err
-	}
 	return s.lnk.SendPacket(raw)
 }
 
-func (s *session) sendType(msgType uint64, room string, body any, nick string) error {
-	env, err := NewEnvelope(msgType, s.sender)
+func marshalType(sender []byte, msgType uint64, room string, body any, nick string) ([]byte, error) {
+	env, err := NewEnvelope(msgType, sender)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if room != "" {
 		env.Room = room
@@ -84,7 +92,15 @@ func (s *session) sendType(msgType uint64, room string, body any, nick string) e
 		env.Nick = nick
 		env.HasNick = true
 	}
-	return s.sendEnvelope(env)
+	return env.Marshal()
+}
+
+func (s *session) sendType(msgType uint64, room string, body any, nick string) error {
+	raw, err := marshalType(s.sender, msgType, room, body, nick)
+	if err != nil {
+		return err
+	}
+	return s.sendRaw(raw)
 }
 
 func (s *session) handleInbound(data []byte) {

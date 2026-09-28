@@ -17,6 +17,9 @@ var (
 	marshalBufPool = sync.Pool{
 		New: func() any { return new(bytes.Buffer) },
 	}
+	marshalMapPool = sync.Pool{
+		New: func() any { return make(map[uint64]any, 9) },
+	}
 )
 
 func init() {
@@ -113,7 +116,7 @@ func (e *Envelope) Marshal() ([]byte, error) {
 		return nil, fmt.Errorf("%w: sender identity", ErrBadFieldLength)
 	}
 
-	m := make(map[uint64]any, 9)
+	m := marshalMapPool.Get().(map[uint64]any)
 	m[KeyVersion] = e.Version
 	m[KeyType] = e.Type
 	m[KeyMsgID] = e.MsgID
@@ -137,7 +140,12 @@ func (e *Envelope) Marshal() ([]byte, error) {
 
 	buf := marshalBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	if err := envelopeEnc.MarshalToBuffer(m, buf); err != nil {
+	err := envelopeEnc.MarshalToBuffer(m, buf)
+	for k := range m {
+		delete(m, k)
+	}
+	marshalMapPool.Put(m)
+	if err != nil {
 		marshalBufPool.Put(buf)
 		return nil, err
 	}
@@ -183,7 +191,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 	if len(msgID) != MessageIDLength {
 		return nil, fmt.Errorf("%w: message id", ErrBadFieldLength)
 	}
-	e.MsgID = cloneBytes(msgID)
+	e.MsgID = msgID
 
 	ts, ok := asUint64(raw[KeyTimestamp])
 	if !ok {
@@ -198,7 +206,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 	if len(sender) != IdentityLength {
 		return nil, fmt.Errorf("%w: sender identity", ErrBadFieldLength)
 	}
-	e.Sender = cloneBytes(sender)
+	e.Sender = sender
 
 	if v, present := raw[KeyRoom]; present {
 		s, ok := v.(string)
@@ -209,11 +217,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 		e.HasRoom = true
 	}
 	if v, present := raw[KeyBody]; present {
-		if b, isBytes := v.([]byte); isBytes {
-			e.Body = cloneBytes(b)
-		} else {
-			e.Body = v
-		}
+		e.Body = v
 		e.HasBody = true
 	}
 	if v, present := raw[KeyNick]; present {
@@ -232,7 +236,7 @@ func UnmarshalEnvelope(data []byte) (*Envelope, error) {
 		if len(dst) != IdentityLength {
 			return nil, fmt.Errorf("%w: destination identity", ErrBadFieldLength)
 		}
-		e.Destination = cloneBytes(dst)
+		e.Destination = dst
 		e.HasDestination = true
 	}
 	return e, nil

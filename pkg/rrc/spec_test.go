@@ -285,10 +285,10 @@ func TestHandlePeer_ErrorTypeNotForwarded(t *testing.T) {
 	h.cfg.applyDefaults()
 	p := &hubPeer{
 		peerHash: bytes.Repeat([]byte{0x01}, IdentityLength),
-		active:   true,
 		sess:     &session{sender: bytes.Repeat([]byte{0x02}, IdentityLength)},
 		rooms:    map[string]struct{}{"#r": {}},
 	}
+	p.active.Store(true)
 	h.peers = map[peerID]*hubPeer{peerKey(p.peerHash): p}
 	h.rooms = map[string]map[peerID]struct{}{"#r": {peerKey(p.peerHash): {}}}
 	env := mustEnvelope(t, TypeError, p.peerHash)

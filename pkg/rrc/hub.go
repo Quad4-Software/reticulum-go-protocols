@@ -4,6 +4,7 @@ package rrc
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Quad4-Software/Reticulum-Go/pkg/destination"
@@ -79,8 +80,9 @@ func NewHubDestination(id *identity.Identity, tr *transport.Transport) (*destina
 type hubPeer struct {
 	sess         *session
 	peerHash     []byte
-	active       bool
+	active       atomic.Bool
 	rooms        map[string]struct{}
+	rateMu       sync.Mutex
 	tokens       float64
 	lastRefill   time.Time
 	pendingHello *Envelope
@@ -308,8 +310,12 @@ func (h *Hub) dropPeerIf(p *hubPeer) {
 		presenceBody = []any{append([]byte(nil), peer...)}
 	}
 	for _, n := range notes {
+		raw, err := marshalType(h.sender, TypeParted, n.room, presenceBody, nick)
+		if err != nil {
+			continue
+		}
 		for _, other := range n.peers {
-			_ = other.sess.sendType(TypeParted, n.room, presenceBody, nick)
+			_ = other.sess.sendRaw(raw)
 		}
 	}
 	if cb != nil {
@@ -326,6 +332,9 @@ func (h *Hub) applyInboundNick(p *hubPeer, nick string) error {
 		return ErrNickTooLong
 	}
 	old := p.sess.getNick()
+	if nick == old {
+		return nil
+	}
 	p.sess.setNick(nick)
 	if len(p.peerHash) == IdentityLength {
 		h.reindexNick(peerKey(p.peerHash), old, nick)
@@ -343,9 +352,7 @@ func (h *Hub) handlePeer(p *hubPeer, env *Envelope) {
 		return
 	}
 
-	h.mu.Lock()
-	active := p.active
-	h.mu.Unlock()
+	active := p.active.Load()
 
 	if env.HasNick {
 		if err := h.applyInboundNick(p, env.Nick); err != nil {
@@ -419,10 +426,8 @@ func (h *Hub) onHello(p *hubPeer, env *Envelope) {
 	body, _ := ParseHelloBody(env.Body)
 	// Nick already applied in handlePeer with length enforcement.
 
-	h.mu.Lock()
-	p.active = true
+	p.active.Store(true)
 	cb := h.handlers.OnHello
-	h.mu.Unlock()
 
 	caps := h.cfg.Capabilities
 	if caps == nil {
@@ -503,8 +508,12 @@ func (h *Hub) onJoin(p *hubPeer, env *Envelope) {
 	if h.cfg.IncludeMemberList {
 		presenceBody = []any{append([]byte(nil), p.peerHash...)}
 	}
-	for _, peer := range others {
-		_ = peer.sess.sendType(TypeJoined, room, presenceBody, nick)
+	if len(others) > 0 {
+		if raw, err := marshalType(h.sender, TypeJoined, room, presenceBody, nick); err == nil {
+			for _, peer := range others {
+				_ = peer.sess.sendRaw(raw)
+			}
+		}
 	}
 	_ = p.sess.sendType(TypeJoined, room, body, "")
 	if cb != nil {
@@ -542,8 +551,12 @@ func (h *Hub) onPart(p *hubPeer, env *Envelope) {
 	if h.cfg.IncludeMemberList {
 		presenceBody = []any{append([]byte(nil), p.peerHash...)}
 	}
-	for _, peer := range others {
-		_ = peer.sess.sendType(TypeParted, room, presenceBody, nick)
+	if len(others) > 0 {
+		if raw, err := marshalType(h.sender, TypeParted, room, presenceBody, nick); err == nil {
+			for _, peer := range others {
+				_ = peer.sess.sendRaw(raw)
+			}
+		}
 	}
 	_ = p.sess.sendType(TypeParted, room, presenceBody, "")
 	if cb != nil {
@@ -592,7 +605,7 @@ func (h *Hub) onRoomContent(p *hubPeer, env *Envelope) {
 	roomMembers := h.rooms[room]
 	members := make([]*hubPeer, 0, len(roomMembers))
 	for pk := range roomMembers {
-		if peer, ok := h.peers[pk]; ok && peer.active {
+		if peer, ok := h.peers[pk]; ok && peer.active.Load() {
 			members = append(members, peer)
 		}
 	}
@@ -616,8 +629,12 @@ func (h *Hub) onRoomContent(p *hubPeer, env *Envelope) {
 		fwd.HasNick = true
 	}
 
+	raw, err := fwd.Marshal()
+	if err != nil {
+		return
+	}
 	for _, peer := range members {
-		_ = peer.sess.sendEnvelope(fwd)
+		_ = peer.sess.sendRaw(raw)
 	}
 	if cb != nil {
 		cb(p.peerHash, env)
@@ -630,8 +647,8 @@ func (h *Hub) takeToken(p *hubPeer) bool {
 		return true
 	}
 	now := time.Now()
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	p.rateMu.Lock()
+	defer p.rateMu.Unlock()
 	elapsed := now.Sub(p.lastRefill).Seconds()
 	if elapsed < 0 {
 		elapsed = 0
@@ -664,7 +681,7 @@ func (h *Hub) roomPeersLocked(room string, exceptKey peerID) []*hubPeer {
 		if pk == exceptKey {
 			continue
 		}
-		if peer, ok := h.peers[pk]; ok && peer.active {
+		if peer, ok := h.peers[pk]; ok && peer.active.Load() {
 			out = append(out, peer)
 		}
 	}
@@ -687,7 +704,7 @@ func (h *Hub) onDirectNotice(p *hubPeer, env *Envelope) {
 
 	h.mu.Lock()
 	target, ok := h.peers[peerKey(env.Destination)]
-	active := ok && target.active
+	active := ok && target.active.Load()
 	nick := p.sess.getNick()
 	cb := h.handlers.OnMsg
 	h.mu.Unlock()
