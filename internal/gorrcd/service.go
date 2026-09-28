@@ -145,7 +145,8 @@ func (s *Service) Start() error {
 	hub.Start()
 
 	if s.cfg.AnnounceOnStart {
-		s.announceOnce()
+		s.wg.Add(1)
+		go s.announceWhenOnline()
 	}
 	s.startWorkers()
 	s.log.Info("hub running", "dest", fmt.Sprintf("%x", dest.GetHash()), "name", s.cfg.HubName)
@@ -225,6 +226,44 @@ func (s *Service) announceOnce() {
 		return
 	}
 	s.stats.Inc("announces", 1)
+	s.log.Debug("announce sent")
+}
+
+// announceOnlineWait bounds how long the startup announce waits for an
+// interface to report online. Client interfaces dial asynchronously, so
+// announcing the moment Start returns races the connects and fails.
+const announceOnlineWait = 30 * time.Second
+
+func (s *Service) announceWhenOnline() {
+	defer s.wg.Done()
+	deadline := time.NewTimer(announceOnlineWait)
+	defer deadline.Stop()
+	poll := time.NewTicker(200 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if s.anyInterfaceOnline() {
+			s.announceOnce()
+			return
+		}
+		select {
+		case <-s.stop:
+			return
+		case <-deadline.C:
+			s.log.Warn("no interface online yet, announcing anyway")
+			s.announceOnce()
+			return
+		case <-poll.C:
+		}
+	}
+}
+
+func (s *Service) anyInterfaceOnline() bool {
+	for _, iface := range s.ifaces {
+		if iface != nil && iface.IsOnline() {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) announceLoop() {

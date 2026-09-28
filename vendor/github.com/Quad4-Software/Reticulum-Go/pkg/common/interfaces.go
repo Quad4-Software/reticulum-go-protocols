@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 // Copyright (c) 2024-2026 Quad4.io
 
 package common
@@ -131,6 +131,9 @@ type BaseInterface struct {
 	// inbound preprocessing can apply IFAC once (RNS 1.5.0).
 	deferInboundIFAC bool
 
+	// ifacMu serializes outbound masking: ifacScratch is shared working
+	// memory, so concurrent Sends would otherwise tear frames.
+	ifacMu      sync.Mutex
 	ifacScratch []byte
 }
 
@@ -287,6 +290,9 @@ func (i *BaseInterface) Enable() {
 	defer i.Mutex.Unlock()
 	i.Enabled = true
 	i.Online = true
+	// Enable resurrects a detached interface; Detach stays the power-down
+	// verb and Enable plus Start must be able to bring it back.
+	i.Detached = false
 }
 
 func (i *BaseInterface) Disable() {
@@ -313,7 +319,9 @@ func (i *BaseInterface) Send(data []byte, address string) error {
 	if err := RejectReceiveOnly(i); err != nil {
 		return err
 	}
+	i.ifacMu.Lock()
 	masked, err := ApplyIFACOutboundInto(i, i.ifacOutboundScratch(len(data)), data)
+	i.ifacMu.Unlock()
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 // Copyright (c) 2024-2026 Quad4.io
 
 package link
@@ -97,7 +97,7 @@ type incomingResourceAsm struct {
 	// It must be computed from the link MDU, matching both
 	// ResourceAdvertisement.Pack (the initial segment 0) and
 	// chooseHashmapUpdateSegment/HashmapSegment on the sending side
-	// (subsequent HMU segments) -- NOT from the resource part SDU (sdu
+	// (subsequent HMU segments), NOT from the resource part SDU (sdu
 	// above), which is a different, smaller value used purely for sizing
 	// actual part payloads. Using the wrong value here silently
 	// desynchronizes every segment offset beyond the first (whose offset
@@ -1265,7 +1265,7 @@ func (l *Link) completeRequestWithResourcePayload(req *RequestReceipt, payload [
 	if req.status != StatusPending && req.status != StatusReceiving {
 		// Receipt already concluded (timeout or a plain response won the
 		// race). Python response_received skips FAILED receipts the same
-		// way; never resurrect or double-fire callbacks.
+		// way. Never resurrect or double-fire callbacks.
 		req.mutex.Unlock()
 		return
 	}
@@ -1279,6 +1279,7 @@ func (l *Link) completeRequestWithResourcePayload(req *RequestReceipt, payload [
 	pcb := req.progressCb
 	cb := req.responseCb
 	req.mutex.Unlock()
+	req.signalDone()
 
 	l.removePendingRequest(req)
 	if pcb != nil {
@@ -1310,18 +1311,29 @@ func (l *Link) assembleIncomingPayload(inner []byte, adv *resource.ResourceAdver
 		if adv.DataSize <= 0 {
 			return nil, errors.New("incoming compressed resource has invalid data_size")
 		}
-		if adv.DataSize > int64(resource.AutoCompressMaxSize) {
+		// Upstream never compresses a resource whose total exceeds
+		// AutoCompressMaxSize, so a non-split advertisement claiming more
+		// is invalid. For split resources DataSize is the whole-resource
+		// total and each segment still decompresses to at most
+		// AutoCompressMaxSize, matching upstream's per-Resource max_length.
+		if !adv.Split && adv.DataSize > int64(resource.AutoCompressMaxSize) {
 			return nil, errors.New("incoming compressed resource exceeds AutoCompressMaxSize")
 		}
-
+		bound := adv.DataSize
+		if bound > int64(resource.AutoCompressMaxSize) {
+			bound = int64(resource.AutoCompressMaxSize)
+		}
 		r := bzip2.NewReader(bytes.NewReader(data))
-		limited := io.LimitReader(r, adv.DataSize+1)
+		limited := io.LimitReader(r, bound+1)
 		decompressed, err := io.ReadAll(limited)
 		if err != nil {
 			return nil, err
 		}
 		if int64(len(decompressed)) > adv.DataSize {
 			return nil, errors.New("incoming compressed resource exceeds advertised data_size")
+		}
+		if len(decompressed) > resource.AutoCompressMaxSize {
+			return nil, errors.New("incoming compressed resource exceeds decompression bound")
 		}
 		data = decompressed
 	}

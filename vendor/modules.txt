@@ -1,4 +1,4 @@
-# github.com/Quad4-Software/Reticulum-Go v1.2.1-0.20260915052851-442bcf6b2f77
+# github.com/Quad4-Software/Reticulum-Go v1.3.2
 ## explicit; go 1.27.1
 github.com/Quad4-Software/Reticulum-Go/internal/storage
 github.com/Quad4-Software/Reticulum-Go/pkg/announce
@@ -106,6 +106,8 @@ go.bug.st/serial
 go.bug.st/serial/unixutils
 # golang.org/x/crypto v0.57.0
 ## explicit; go 1.26.0
+golang.org/x/crypto/argon2
+golang.org/x/crypto/blake2b
 golang.org/x/crypto/chacha20
 golang.org/x/crypto/chacha20poly1305
 golang.org/x/crypto/curve25519

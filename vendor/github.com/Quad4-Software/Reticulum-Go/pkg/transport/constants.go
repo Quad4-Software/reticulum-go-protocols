@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 // Copyright (c) 2024-2026 Quad4.io
 
 package transport
@@ -127,6 +127,10 @@ const (
 
 	// maxQueuedDiscoveryPRs is the maximum pending discovery path requests.
 	maxQueuedDiscoveryPRs = 32
+
+	// maxDiscoveryPathRequests bounds remote-triggered discovery state.
+	// Entries also expire via cleanupExpiredDiscoveryRequests.
+	maxDiscoveryPathRequests = 4096
 
 	// discoveryPRTxThrottle is the minimum interval between processing
 	// queued discovery path requests.

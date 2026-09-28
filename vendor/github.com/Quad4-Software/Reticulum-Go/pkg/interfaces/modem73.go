@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 // Copyright (c) 2024-2026 Quad4.io
 
 package interfaces
@@ -310,6 +310,11 @@ func (m *Modem73Interface) probeInitialMTU() {
 func (m *Modem73Interface) applyMTU(mtu int) {
 	if mtu < modem73MTUFloor {
 		mtu = modem73MTUFloor
+	}
+	// The control channel is unauthenticated, so a pushed payload_size is
+	// hostile input: cap it or the KISS decoder accepts gigabyte frames.
+	if mtu > backboneHWMTU {
+		mtu = backboneHWMTU
 	}
 	m.Mutex.Lock()
 	old := m.MTU

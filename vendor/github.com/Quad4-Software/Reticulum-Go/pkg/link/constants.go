@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 // Copyright (c) 2024-2026 Quad4.io
 
 package link
@@ -52,8 +52,11 @@ const (
 	DestTypeLink = 0x03
 
 	MaxPendingRequests = 8
-	MinRequestDataLen  = 3
-	MinResponseDataLen = 2
+	// MaxPendingResourceSends bounds goroutines parked inside SendResource.
+	// each retains a full resource copy.
+	MaxPendingResourceSends = 8
+	MinRequestDataLen       = 3
+	MinResponseDataLen      = 2
 
 	// RequestTimestampMaxSkewPast is the maximum age of a request's
 	// requested_at field before it is rejected as a potential replay.

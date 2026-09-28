@@ -1,5 +1,5 @@
-github.com/Quad4-Software/Reticulum-Go v1.2.1-0.20260915052851-442bcf6b2f77 h1:SxCNaiO1BQrgY7gvTc0Wz1NCUwOikMxGb/AV0e+TjQw=
-github.com/Quad4-Software/Reticulum-Go v1.2.1-0.20260915052851-442bcf6b2f77/go.mod h1:Bw9LnygboBCmsUyJYIxO5AKGK3N61B4YF3KiRyWgrHE=
+github.com/Quad4-Software/Reticulum-Go v1.3.2 h1:aZ1vdhT/CTrJT/gWcmhe1Qeces0KV7BnEnQZg9tT+os=
+github.com/Quad4-Software/Reticulum-Go v1.3.2/go.mod h1:uf9e5wZFMnA1PIbRtrcrfLvV8I2bCjVQiRizdXQEt/Y=
 github.com/Quad4-Software/bzip2 v1.0.1 h1:d8nE46X+92KxXhwFt3xLBlL/OYE6dMvaqFbeRYgAPdI=
 github.com/Quad4-Software/bzip2 v1.0.1/go.mod h1:3Kb23wxfrwE9+Nm9BNenON1ZktP42W1HhH9uUgs6bRw=
 github.com/Quad4-Software/msgpack/v5 v5.9.2 h1:u7w+VhyG3TgRcEJp5EL5Ycentzv2OUnt4lKhO6S7JFo=

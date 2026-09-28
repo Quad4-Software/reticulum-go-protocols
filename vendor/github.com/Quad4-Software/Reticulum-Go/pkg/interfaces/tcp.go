@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Reticulum
 // Copyright (c) 2024-2026 Quad4.io
 
 package interfaces
@@ -692,6 +692,11 @@ func (ts *TCPServerInterface) Start() error {
 					return // Normal shutdown
 				}
 				debug.Log(debug.DebugError, "Error accepting connection", "error", err)
+				select {
+				case <-time.After(50 * time.Millisecond):
+				case <-done:
+					return
+				}
 				continue
 			}
 
@@ -734,6 +739,12 @@ func (ts *TCPServerInterface) Stop() error {
 }
 
 func (ts *TCPServerInterface) handleConnection(conn net.Conn) {
+	// Accepted sockets get no liveness probe by default. A silent peer would
+	// otherwise pin a goroutine and read buffer forever.
+	if tc, ok := conn.(*net.TCPConn); ok {
+		_ = tc.SetKeepAlive(true)
+		_ = tc.SetKeepAlivePeriod(30 * time.Second)
+	}
 	addr := conn.RemoteAddr().String()
 	ts.Mutex.Lock()
 	ts.connections[addr] = conn
@@ -798,13 +809,14 @@ func (ts *TCPServerInterface) ProcessOutgoing(data []byte) error {
 		return fmt.Errorf("interface offline")
 	}
 
+	// Build into a fresh buffer per call: sharing ts.txFrame lets concurrent
+	// senders interleave writes into one backing array and puts torn frames
+	// on the wire.
 	var frame []byte
 	if ts.kissFraming {
-		frame = appendFrameKISS(ts.txFrame[:0], data)
-		ts.txFrame = frame
+		frame = appendFrameKISS(nil, data)
 	} else {
-		frame = appendFrameHDLC(ts.txFrame[:0], data)
-		ts.txFrame = frame
+		frame = appendFrameHDLC(nil, data)
 	}
 
 	ts.Mutex.Lock()
